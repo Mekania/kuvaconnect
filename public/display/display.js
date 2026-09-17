@@ -136,7 +136,17 @@ function layoutAlbum() {
   // Nunca más columnas que fotos: con una sola foto y cuatro columnas, la foto
   // se queda en la celda de la izquierda y la pantalla se ve rota.
   const cols = Math.min(best.cols, Math.max(1, n));
+  const rows = Math.max(1, Math.min(best.rows, Math.ceil(n / cols)));
   document.documentElement.style.setProperty('--cols', cols);
+
+  // El tamaño máximo de cada foto va en píxeles, no en porcentaje: un
+  // max-height en % contra una altura indefinida no limita nada, y la foto se
+  // desbordaba por abajo. Aquí ya conocemos la celda exacta.
+  const cellW = Math.floor((availW - gap * (cols - 1)) / cols);
+  const cellH = Math.floor((availH - gap * (rows - 1)) / rows);
+  const root = document.documentElement.style;
+  root.setProperty('--cell-w', `${cellW}px`);
+  root.setProperty('--cell-h', `${cellH}px`);
 
   const capacity = cols * best.rows;
   for (let i = capacity; i < tiles.length; i++) {

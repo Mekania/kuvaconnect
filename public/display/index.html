@@ -130,7 +130,7 @@
   }
 
   .shot {
-    max-width: 100%; max-height: 100%;
+    max-width: var(--cell-w, 100%); max-height: var(--cell-h, 100%);
     border-radius: clamp(8px, .7vw, 14px);
     overflow: hidden;
     background: #fff;
@@ -140,7 +140,11 @@
     animation: drop-in .65s cubic-bezier(.2, .9, .25, 1) both;
     transition: rotate .4s ease;
   }
-  .shot img { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; }
+  .shot img {
+    display: block; width: auto; height: auto;
+    max-width: var(--cell-w, 100%);
+    max-height: var(--cell-h, 100%);
+  }
   .shot.fresh {
     box-shadow: 0 0 0 5px var(--gold), 0 16px 40px rgba(110, 7, 48, .3);
     rotate: 0deg;
