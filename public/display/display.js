@@ -237,30 +237,68 @@ async function boot() {
   if (!photos.length) showEmpty();
   else for (const p of [...photos].reverse()) addPhoto(p, { fresh: false });
 
-  stream(`/api/event/${eventId}/stream`, {
-    onOpen: () => setOnline(true),
-    onError: () => setOnline(false),
-    hello: (d) => setCount(d.counts.approved),
-    'photo:new': (photo) => {
-      addPhoto(photo);
-      setCount(total + 1);
-      celebrate(photo);
-    },
-    'photo:removed': ({ id }) => {
-      // Rechazar algo que estaba pendiente también manda este evento, y esa foto
-      // nunca llegó a contarse: solo descontamos si de verdad estaba en pantalla.
-      if (removePhoto(id)) setCount(Math.max(0, total - 1));
-    },
-  });
+  const onNew = (photo) => {
+    addPhoto(photo);
+    setCount(total + 1);
+    celebrate(photo);
+  };
+  const onRemoved = (id) => {
+    // Rechazar algo que estaba pendiente también manda este evento, y esa foto
+    // nunca llegó a contarse: solo descontamos si de verdad estaba en pantalla.
+    if (removePhoto(id)) setCount(Math.max(0, total - 1));
+  };
 
-  // Red de seguridad: si algún evento SSE se perdió, resincronizamos cada 2 min.
-  setInterval(async () => {
+  if (info.live === 'poll') {
+    pollLoop(onNew, onRemoved);
+  } else {
+    stream(`/api/event/${eventId}/stream`, {
+      onOpen: () => setOnline(true),
+      onError: () => setOnline(false),
+      hello: (d) => setCount(d.counts.approved),
+      'photo:new': onNew,
+      'photo:removed': ({ id }) => onRemoved(id),
+    });
+
+    // Red de seguridad: si algún evento SSE se perdió, resincronizamos cada 2 min.
+    setInterval(() => resync(onNew, onRemoved, { celebrate: false }), 120000);
+  }
+}
+
+/**
+ * Sondeo, para cuando corremos en serverless y no hay SSE posible.
+ * Compara el feed con lo que ya está en pantalla y sintetiza los mismos eventos,
+ * así el resto de la pantalla no sabe por cuál transporte llegó la foto.
+ */
+const POLL_MS = 3000;
+
+async function resync(onNew, onRemoved, { celebrate: doCelebrate = true } = {}) {
+  const { photos, counts } = await api(`/api/event/${eventId}/feed?limit=${MAX_TILES}`);
+  setOnline(true);
+  const live = new Set(photos.map((p) => p.id));
+
+  for (const id of [...seen]) if (!live.has(id)) onRemoved(id);
+
+  // De viejas a nuevas, para que el orden de entrada sea el real.
+  const incoming = [...photos].reverse().filter((p) => !seen.has(p.id));
+  for (const p of incoming) {
+    if (doCelebrate) onNew(p);
+    else addPhoto(p, { fresh: false });
+  }
+  setCount(counts.approved);
+}
+
+function pollLoop(onNew, onRemoved) {
+  let first = true;
+  const tick = async () => {
     try {
-      const { photos: fresh, counts } = await api(`/api/event/${eventId}/feed?limit=${MAX_TILES}`);
-      setCount(counts.approved);
-      for (const p of [...fresh].reverse()) if (!seen.has(p.id)) addPhoto(p, { fresh: false });
-    } catch { /* ya lo reintentará */ }
-  }, 120000);
+      await resync(onNew, onRemoved, { celebrate: !first });
+      first = false;
+    } catch {
+      setOnline(false);
+    }
+    setTimeout(tick, POLL_MS);
+  };
+  tick();
 }
 
 boot();

@@ -42,10 +42,26 @@ const OAUTH_CLIENT_FILE = path.join(ROOT, 'credentials', 'oauth-client.json');
  *     "Mi unidad": si la usas, el destino debe ser una Unidad compartida.
  *     Config: credentials/service-account.json + DRIVE_SHARED_DRIVE_ID.
  */
+/**
+ * En la nube no hay disco donde dejar credenciales, asi que todo puede venir
+ * por variables de entorno. El token de OAuth guarda un refresh_token que NO
+ * caduca ni rota, asi que vive bien dentro de una env var de Vercel.
+ */
+function hasFileToken() { return fs.existsSync(TOKEN_FILE); }
+function hasEnvToken() { return Boolean(process.env.GOOGLE_OAUTH_TOKEN_JSON); }
+function hasClient() {
+  return fs.existsSync(OAUTH_CLIENT_FILE) || Boolean(process.env.GOOGLE_OAUTH_CLIENT_ID);
+}
+
 export function authMode() {
-  if (fs.existsSync(TOKEN_FILE) && (fs.existsSync(OAUTH_CLIENT_FILE) || process.env.GOOGLE_OAUTH_CLIENT_ID)) return 'oauth';
+  if ((hasEnvToken() || hasFileToken()) && hasClient()) return 'oauth';
   if (config.drive.credentialsJSON || fs.existsSync(config.drive.credentialsFile)) return 'service-account';
   return null;
+}
+
+function readToken() {
+  if (hasEnvToken()) return JSON.parse(process.env.GOOGLE_OAUTH_TOKEN_JSON);
+  return JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8'));
 }
 
 export function oauthClient() {
@@ -79,11 +95,16 @@ export function getDrive() {
   let auth;
   if (mode === 'oauth') {
     auth = oauthClient();
-    auth.setCredentials(JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8')));
+    auth.setCredentials(readToken());
     auth.on('tokens', (t) => {
-      // Google solo manda refresh_token la primera vez: conservamos el que ya tenemos.
-      const prev = JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8'));
-      saveToken({ ...prev, ...t });
+      // Google solo manda refresh_token la primera vez: conservamos el que ya
+      // tenemos. En la nube no hay donde escribir, y tampoco hace falta: el
+      // access_token se renueva en memoria en cada arranque de la funcion.
+      if (hasEnvToken()) return;
+      try {
+        const prev = JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8'));
+        saveToken({ ...prev, ...t });
+      } catch { /* sin disco de escritura: seguimos con el token en memoria */ }
     });
   } else {
     const creds = config.drive.credentialsJSON

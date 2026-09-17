@@ -38,29 +38,36 @@ admin.get('/session', (req, res) => res.json({ authenticated: auth.isAdmin(req) 
 
 admin.use(auth.requireAdmin);
 
-function withEvent(req, res, next) {
-  const ev = getEvent(req.params.event);
-  if (!ev) return res.status(404).json({ error: 'Evento no encontrado' });
-  req.event = ev;
-  next();
+async function withEvent(req, res, next) {
+  try {
+    const ev = await getEvent(req.params.event);
+    if (!ev) return res.status(404).json({ error: 'Evento no encontrado' });
+    req.event = ev;
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 }
 
 /* ─────────────────────────────── eventos ─────────────────────────────────── */
 
-admin.get('/bootstrap', (req, res) => {
-  const active = activeEvent();
+admin.get('/bootstrap', async (req, res) => {
+  const [active, events] = await Promise.all([activeEvent(), listEvents()]);
+  const withCounts = await Promise.all(events.map(async (e) => ({
+    ...publicEvent(e), active: e.active, counts: await countByStatus(e.id),
+  })));
   res.json({
-    events: listEvents().map((e) => ({ ...publicEvent(e), active: e.active, counts: countByStatus(e.id) })),
+    events: withCounts,
     activeEventId: active?.id || null,
     frames: listFrames(),
-    drive: driveSync.queueStats(),
+    drive: await driveSync.queueStats(),
     baseUrl: baseUrl(),
   });
 });
 
 admin.get('/events/:event', withEvent, async (req, res) => {
   res.json({
-    event: { ...req.event, counts: countByStatus(req.event.id) },
+    event: { ...req.event, counts: await countByStatus(req.event.id) },
     uploadUrl: uploadUrl(req.event),
     displayUrl: `${baseUrl()}/d/${req.event.slug}`,
     diskBytes: await media.diskUsage(req.event.id),
@@ -82,35 +89,36 @@ const EDITABLE = new Set([
   'displayColumns', 'theme', 'active',
 ]);
 
-admin.patch('/events/:event', withEvent, (req, res) => {
+admin.patch('/events/:event', withEvent, async (req, res) => {
   const patch = {};
   for (const [k, v] of Object.entries(req.body || {})) if (EDITABLE.has(k)) patch[k] = v;
   if (patch.frameId) patch.frameId = getFrame(patch.frameId).id;
-  const ev = updateEvent(req.event.id, patch);
-  if (patch.active === true) setActive(ev.id);
+  let ev = await updateEvent(req.event.id, patch);
+  if (patch.active === true) ev = await setActive(ev.id);
   res.json({ event: ev });
 });
 
-admin.post('/events/:event/activate', withEvent, (req, res) => {
-  res.json({ event: setActive(req.event.id) });
+admin.post('/events/:event/activate', withEvent, async (req, res) => {
+  res.json({ event: await setActive(req.event.id) });
 });
 
 /* ───────────────────────────── moderación ────────────────────────────────── */
 
-admin.get('/events/:event/photos', withEvent, (req, res) => {
+admin.get('/events/:event/photos', withEvent, async (req, res) => {
   const status = req.query.status && req.query.status !== 'all'
     ? String(req.query.status).split(',')
     : undefined;
   res.json({
-    photos: queue(req.event.id, { status, limit: Math.min(Number(req.query.limit) || 300, 1000) }),
-    counts: countByStatus(req.event.id),
-    drive: driveSync.queueStats(),
+    photos: await queue(req.event.id, { status, limit: Math.min(Number(req.query.limit) || 300, 1000) }),
+    counts: await countByStatus(req.event.id),
+    drive: await driveSync.queueStats(),
   });
 });
 
-admin.get('/events/:event/stream', withEvent, (req, res) => {
+admin.get('/events/:event/stream', withEvent, async (req, res) => {
+  const counts = await countByStatus(req.event.id);
   subscribe(adminChannel(req.event.id), res);
-  res.write(`event: hello\ndata: ${JSON.stringify({ counts: countByStatus(req.event.id) })}\n\n`);
+  res.write(`event: hello\ndata: ${JSON.stringify({ counts })}\n\n`);
 });
 
 admin.post('/photos/:id/approve', async (req, res) => {
@@ -119,23 +127,23 @@ admin.post('/photos/:id/approve', async (req, res) => {
   res.json({ photo: adminPhoto(p) });
 });
 
-admin.post('/photos/:id/reject', (req, res) => {
-  const p = reject(req.params.id, String(req.body?.reason || '').slice(0, 200));
+admin.post('/photos/:id/reject', async (req, res) => {
+  const p = await reject(req.params.id, String(req.body?.reason || '').slice(0, 200));
   if (!p) return res.status(404).json({ error: 'Foto no encontrada' });
   res.json({ photo: adminPhoto(p) });
 });
 
-admin.post('/photos/:id/printed', (req, res) => {
-  const p = markPrinted(req.params.id, req.body?.printed !== false);
+admin.post('/photos/:id/printed', async (req, res) => {
+  const p = await markPrinted(req.params.id, req.body?.printed !== false);
   if (!p) return res.status(404).json({ error: 'Foto no encontrada' });
   res.json({ photo: adminPhoto(p) });
 });
 
 admin.post('/photos/:id/recompose', async (req, res) => {
-  const p = getPhoto(req.params.id);
+  const p = await getPhoto(req.params.id);
   if (!p) return res.status(404).json({ error: 'Foto no encontrada' });
   try {
-    res.json({ photo: adminPhoto(await recompose(p, getEvent(p.eventId))) });
+    res.json({ photo: adminPhoto(await recompose(p, await getEvent(p.eventId))) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -146,27 +154,25 @@ admin.post('/events/:event/bulk', withEvent, async (req, res) => {
   const { action, ids } = req.body || {};
   const targets = Array.isArray(ids) && ids.length
     ? ids
-    : listPhotos(req.event.id, { status: 'pending' }).map((p) => p.id);
+    : (await listPhotos(req.event.id, { status: 'pending' })).map((p) => p.id);
   let n = 0;
   for (const id of targets) {
     if (action === 'approve') { await approve(id); n++; }
-    else if (action === 'reject') { reject(id, 'Rechazo masivo'); n++; }
-    else if (action === 'printed') { markPrinted(id, true); n++; }
+    else if (action === 'reject') { await reject(id, 'Rechazo masivo'); n++; }
+    else if (action === 'printed') { await markPrinted(id, true); n++; }
   }
   res.json({ ok: true, affected: n });
 });
 
 /** Recompone todas las impresiones del evento — al cambiar de marco. */
 admin.post('/events/:event/recompose-all', withEvent, async (req, res) => {
-  const rows = listPhotos(req.event.id).filter((p) => p.status !== 'error');
+  const rows = (await listPhotos(req.event.id)).filter((p) => p.status !== 'error');
+  // En serverless la funcion muere al responder, asi que aqui si esperamos.
+  for (const p of rows) {
+    try { await recompose(p, req.event); } catch (err) { log.warn(`recompose ${p.id}: ${err.message}`); }
+  }
+  log.ok(`marcos regenerados: ${rows.length}`);
   res.json({ ok: true, queued: rows.length });
-  // Se responde ya y se procesa en segundo plano: son cientos de imágenes a 300dpi.
-  (async () => {
-    for (const p of rows) {
-      try { await recompose(p, getEvent(req.event.id)); } catch (err) { log.warn(`recompose ${p.id}: ${err.message}`); }
-    }
-    log.ok(`marcos regenerados: ${rows.length}`);
-  })();
 });
 
 /* ───────────────────────────── marcos y vista previa ─────────────────────── */
@@ -194,7 +200,7 @@ async function sampleShot(orientation) {
 
 admin.get('/frames/:id/preview.jpg', async (req, res) => {
   const orientation = req.query.orientation === 'landscape' ? 'landscape' : 'portrait';
-  const ev = req.query.event ? getEvent(req.query.event) : activeEvent();
+  const ev = req.query.event ? await getEvent(req.query.event) : await activeEvent();
   try {
     const sample = await sampleShot(orientation);
     const framed = await composeFramed(sample, {
@@ -212,7 +218,7 @@ admin.get('/frames/:id/preview.jpg', async (req, res) => {
 /* ──────────────────────────────── Drive ──────────────────────────────────── */
 
 admin.get('/drive/status', async (req, res) => {
-  const stats = driveSync.queueStats();
+  const stats = await driveSync.queueStats();
   let account = null;
   if (drive.isConfigured()) {
     try { account = await drive.whoAmI(); } catch (err) { stats.error = err.message; }
@@ -222,13 +228,13 @@ admin.get('/drive/status', async (req, res) => {
 
 admin.post('/drive/sync', async (req, res) => {
   await driveSync.syncNow();
-  res.json({ ok: true, ...driveSync.queueStats() });
+  res.json({ ok: true, ...(await driveSync.queueStats()) });
 });
 
 admin.post('/drive/requeue', async (req, res) => {
   drive.resetClient();
-  const n = driveSync.requeueAll();
-  driveSync.syncNow();
+  const n = await driveSync.requeueAll();
+  await driveSync.syncNow();
   res.json({ ok: true, requeued: n });
 });
 

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/index.js": {
+      "memory": 1769,
+      "maxDuration": 60,
+      "includeFiles": "assets/**"
+    }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index.js" },
+    { "source": "/media/(.*)", "destination": "/api/index.js" },
+    { "source": "/health", "destination": "/api/index.js" },
+    { "source": "/d/:slug*", "destination": "/display/index.html" },
+    { "source": "/u/:slug*", "destination": "/upload/index.html" },
+    { "source": "/admin", "destination": "/admin/index.html" },
+    { "source": "/", "destination": "/display/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/(display|upload|admin|shared)/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "no-store" }]
+    }
+  ]
+}

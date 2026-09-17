@@ -16,6 +16,8 @@ const state = {
   cursor: 0,           // índice seleccionado en la vista de moderación
   lightbox: null,
   sse: null,
+  live: 'sse',
+  pollTimer: null,
 };
 
 /* ─────────────────────────────── sesión ─────────────────────────────────── */
@@ -433,7 +435,29 @@ async function loadPhotos() {
   render();
 }
 
+/**
+ * En serverless no hay SSE: el panel sondea. 4 s es imperceptible moderando y
+ * no castiga el numero de invocaciones de la funcion.
+ */
+function connectPolling() {
+  const dot = $('#dot');
+  const tick = async () => {
+    try {
+      await loadPhotos();
+      dot.className = 'dot dot-live';
+      $('#liveLabel').textContent = 'En vivo';
+    } catch {
+      dot.className = 'dot dot-off';
+      $('#liveLabel').textContent = 'Reconectando';
+    }
+    state.pollTimer = setTimeout(tick, 4000);
+  };
+  clearTimeout(state.pollTimer);
+  tick();
+}
+
 function connect() {
+  if (state.live === 'poll') return connectPolling();
   state.sse?.close();
   state.sse = stream(`/api/admin/events/${state.eventId}/stream`, {
     onOpen: () => { $('#dot').className = 'dot dot-live'; $('#liveLabel').textContent = 'En vivo'; },
@@ -463,6 +487,9 @@ async function bootstrap(preferEventId) {
   $('#eventSel').replaceChildren(...boot.events.map((e) => el('option', {
     value: e.id, ...(e.id === eventId ? { selected: 'selected' } : {}),
   }, e.name)));
+
+  // El transporte en vivo lo dicta el servidor (SSE en local, sondeo en la nube).
+  state.live = (await api(`/api/event/${eventId}`).catch(() => ({}))).live || 'sse';
 
   const detail = await api(`/api/admin/events/${eventId}`);
   state.event = detail.event;

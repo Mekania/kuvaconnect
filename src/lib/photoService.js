@@ -1,5 +1,5 @@
 import sharp from 'sharp';
-import { addPhoto, getEvent, getPhoto, listPhotos, updatePhoto, countByStatus } from './db.js';
+import { addPhoto, getEvent, getPhoto, listPhotos, updatePhoto, nextSeq } from './db.js';
 import { composeFramed, makeWebVersions, makeRawPreview, analyze } from './compose.js';
 import * as media from './media.js';
 import { frameMeta } from './eventService.js';
@@ -30,8 +30,8 @@ export function publicPhoto(p) {
     printedAt: p.printedAt || null,
     flags: p.flags || [],
     urls: {
-      thumb: `/media/${p.eventId}/thumb/${p.id}.jpg`,
-      web: `/media/${p.eventId}/web/${p.id}.jpg`,
+      thumb: media.publicUrl(p.eventId, 'thumb', p.id),
+      web: media.publicUrl(p.eventId, 'web', p.id),
     },
     drive: {
       state: p.drive?.state || 'idle',
@@ -47,19 +47,15 @@ export function adminPhoto(p) {
     ...publicPhoto(p),
     urls: {
       ...publicPhoto(p).urls,
-      raw: `/media/${p.eventId}/raw/${p.id}.jpg`,
-      print: `/media/${p.eventId}/print/${p.id}.jpg`,
-      original: `/media/${p.eventId}/orig/${p.id}.${p.originalExt || 'jpg'}`,
+      raw: media.publicUrl(p.eventId, 'raw', p.id),
+      print: media.publicUrl(p.eventId, 'print', p.id),
+      original: media.publicUrl(p.eventId, 'orig', p.id, p.originalExt || 'jpg'),
     },
     device: p.device,
     ip: p.ip,
     error: p.error || null,
     driveDetail: p.drive || null,
   };
-}
-
-function nextSeq(eventId) {
-  return countByStatus(eventId).total + 1;
 }
 
 /**
@@ -86,10 +82,10 @@ export async function ingest(event, { buffer, mimeType, device, ip, caption, aut
     });
   } catch (err) {
     log.error(`no se pudo componer ${id}: ${err.message}`);
-    const broken = addPhoto({
+    const broken = await addPhoto({
       id,
       eventId: event.id,
-      seq: nextSeq(event.id),
+      seq: await nextSeq(event.id),
       status: 'error',
       error: err.message,
       mimeType,
@@ -101,7 +97,7 @@ export async function ingest(event, { buffer, mimeType, device, ip, caption, aut
       createdAt: new Date().toISOString(),
       drive: { state: 'pending', pendingOps: [], attempts: 0 },
     });
-    queueOp(id, OPS.UPLOAD_ORIGINAL); // el original se guarda igual: no se pierde la foto del invitado
+    await queueOp(id, OPS.UPLOAD_ORIGINAL); // el original se guarda igual: no se pierde la foto del invitado
     publish(adminChannel(event.id), 'photo:new', adminPhoto(broken));
     throw Object.assign(new Error('No pudimos procesar esa imagen. Intenta con otra foto.'), { code: 'COMPOSE_FAILED' });
   }
@@ -119,10 +115,11 @@ export async function ingest(event, { buffer, mimeType, device, ip, caption, aut
   ]);
 
   const autoApprove = event.moderation === 'post';
-  const photo = addPhoto({
+  const seq = await nextSeq(event.id);
+  const photo = await addPhoto({
     id,
     eventId: event.id,
-    seq: nextSeq(event.id),
+    seq,
     status: autoApprove ? 'approved' : 'pending',
     orientation: framed.orientation,
     fitMode: framed.fitMode,
@@ -144,8 +141,8 @@ export async function ingest(event, { buffer, mimeType, device, ip, caption, aut
     drive: { state: 'pending', pendingOps: [], attempts: 0 },
   });
 
-  queueOp(id, OPS.UPLOAD_ORIGINAL);
-  if (autoApprove) queueOp(id, OPS.UPLOAD_PRINT);
+  await queueOp(id, OPS.UPLOAD_ORIGINAL);
+  if (autoApprove) await queueOp(id, OPS.UPLOAD_PRINT);
 
   publish(adminChannel(event.id), 'photo:new', adminPhoto(photo));
   if (autoApprove) publish(event.id, 'photo:new', publicPhoto(photo));
@@ -157,35 +154,39 @@ export async function ingest(event, { buffer, mimeType, device, ip, caption, aut
 /* ─────────────────────────────── moderación ──────────────────────────────── */
 
 export async function approve(photoId, by = 'panel') {
-  const p = getPhoto(photoId);
+  const p = await getPhoto(photoId);
   if (!p || p.status === 'approved') return p;
   const was = p.status;
 
   // Si venía de un rechazo, sus derivados públicos fueron borrados: hay que
   // volver a generarlos antes de anunciarla en la pantalla.
-  if (was === 'rejected' && !media.exists(media.filePath(p.eventId, 'web', p.id))) {
+  if (was === 'rejected' && !(await media.has(p.eventId, 'web', p.id))) {
     try {
-      await recompose(p, getEvent(p.eventId));
+      await recompose(p, await getEvent(p.eventId));
     } catch (err) {
       log.error(`no se pudo rehacer ${photoId} al aprobar: ${err.message}`);
       return p;
     }
   }
 
-  updatePhoto(photoId, { status: 'approved', approvedAt: new Date().toISOString(), moderatedBy: by, rejectedReason: null });
-  queueOp(photoId, OPS.UPLOAD_PRINT);
-  if (was === 'rejected') queueOp(photoId, OPS.UPLOAD_ORIGINAL);
-  publish(p.eventId, 'photo:new', publicPhoto(p));
-  publish(adminChannel(p.eventId), 'photo:updated', adminPhoto(p));
-  log.info(`aprobada #${p.seq} (${photoId})`);
-  return p;
+  const updated = await updatePhoto(photoId, {
+    status: 'approved', approvedAt: new Date().toISOString(), moderatedBy: by, rejectedReason: null,
+  });
+  await queueOp(photoId, OPS.UPLOAD_PRINT);
+  if (was === 'rejected') await queueOp(photoId, OPS.UPLOAD_ORIGINAL);
+  publish(p.eventId, 'photo:new', publicPhoto(updated));
+  publish(adminChannel(p.eventId), 'photo:updated', adminPhoto(updated));
+  log.info(`aprobada #${updated.seq} (${photoId})`);
+  return updated;
 }
 
-export function reject(photoId, reason = '', by = 'panel') {
-  const p = getPhoto(photoId);
+export async function reject(photoId, reason = '', by = 'panel') {
+  const p = await getPhoto(photoId);
   if (!p) return null;
-  updatePhoto(photoId, { status: 'rejected', rejectedAt: new Date().toISOString(), rejectedReason: reason, moderatedBy: by });
-  queueOp(photoId, OPS.MOVE_REJECTED);
+  const updated = await updatePhoto(photoId, {
+    status: 'rejected', rejectedAt: new Date().toISOString(), rejectedReason: reason, moderatedBy: by,
+  });
+  await queueOp(photoId, OPS.MOVE_REJECTED);
 
   // Las versiones web/miniatura se sirven sin autenticación: si alguien subió
   // algo que no debía, no basta con sacarlo de la pantalla — hay que quitarlo
@@ -194,18 +195,18 @@ export function reject(photoId, reason = '', by = 'panel') {
   media.removePublic(p.eventId, p.id).catch((err) => log.warn(`limpiando ${photoId}: ${err.message}`));
 
   publish(p.eventId, 'photo:removed', { id: p.id });
-  publish(adminChannel(p.eventId), 'photo:updated', adminPhoto(p));
-  log.info(`rechazada #${p.seq} (${photoId})${reason ? ` · ${reason}` : ''}`);
-  return p;
+  publish(adminChannel(p.eventId), 'photo:updated', adminPhoto(updated));
+  log.info(`rechazada #${updated.seq} (${photoId})${reason ? ` · ${reason}` : ''}`);
+  return updated;
 }
 
-export function markPrinted(photoId, printed = true) {
-  const p = getPhoto(photoId);
+export async function markPrinted(photoId, printed = true) {
+  const p = await getPhoto(photoId);
   if (!p) return null;
-  updatePhoto(photoId, { printedAt: printed ? new Date().toISOString() : null });
-  if (printed) queueOp(photoId, OPS.MOVE_PRINTED);
-  publish(adminChannel(p.eventId), 'photo:updated', adminPhoto(p));
-  return p;
+  const updated = await updatePhoto(photoId, { printedAt: printed ? new Date().toISOString() : null });
+  if (printed) await queueOp(photoId, OPS.MOVE_PRINTED);
+  publish(adminChannel(p.eventId), 'photo:updated', adminPhoto(updated));
+  return updated;
 }
 
 /** Recompone la impresión: útil si se cambia el marco a mitad de evento. */
@@ -222,21 +223,23 @@ export async function recompose(photo, event) {
     media.write(event.id, 'web', photo.id, web),
     media.write(event.id, 'thumb', photo.id, thumb),
   ]);
-  updatePhoto(photo.id, { frameId: framed.frameId, orientation: framed.orientation, fitMode: framed.fitMode });
+  const updated = await updatePhoto(photo.id, {
+    frameId: framed.frameId, orientation: framed.orientation, fitMode: framed.fitMode,
+  });
 
   // La copia vieja de Drive ya no sirve: se reemplaza.
   if (photo.drive?.printId) {
-    queueOp(photo.id, OPS.DELETE_PRINT);
-    if (photo.status === 'approved') queueOp(photo.id, OPS.UPLOAD_PRINT);
+    await queueOp(photo.id, OPS.DELETE_PRINT);
+    if (photo.status === 'approved') await queueOp(photo.id, OPS.UPLOAD_PRINT);
   }
-  publish(adminChannel(event.id), 'photo:updated', adminPhoto(getPhoto(photo.id)));
-  return getPhoto(photo.id);
+  publish(adminChannel(event.id), 'photo:updated', adminPhoto(updated));
+  return updated;
 }
 
-export function feed(eventId, { limit = 200 } = {}) {
-  return listPhotos(eventId, { status: 'approved', limit }).map(publicPhoto);
+export async function feed(eventId, { limit = 200 } = {}) {
+  return (await listPhotos(eventId, { status: 'approved', limit })).map(publicPhoto);
 }
 
-export function queue(eventId, { status, limit = 300 } = {}) {
-  return listPhotos(eventId, { status, limit }).map(adminPhoto);
+export async function queue(eventId, { status, limit = 300 } = {}) {
+  return (await listPhotos(eventId, { status, limit })).map(adminPhoto);
 }

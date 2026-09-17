@@ -5,12 +5,13 @@ import { config, baseUrl, lanIP } from './config.js';
 import { api, uploadUrl } from './routes/api.js';
 import { admin } from './routes/admin.js';
 import { isAdmin } from './lib/auth.js';
-import { getEvent } from './lib/db.js';
+import { getEvent, driverInfo as dbDriver } from './lib/db.js';
 import { ensureDefaultEvent, activeEvent } from './lib/eventService.js';
 import { loadOverlayFrames, listFrames } from './lib/frames/index.js';
 import * as driveSync from './lib/driveSync.js';
 import * as drive from './lib/drive.js';
-import { eventDir, KINDS } from './lib/media.js';
+import * as media from './lib/media.js';
+const { KINDS } = media;
 import { HEIF_SUPPORTED } from './lib/photoService.js';
 import { logger } from './lib/logger.js';
 
@@ -29,19 +30,41 @@ app.disable('x-powered-by');
  */
 const PROTECTED_KINDS = new Set(['orig', 'raw', 'print']);
 
-app.get('/media/:event/:kind/:file', (req, res) => {
+app.get('/media/:event/:kind/:file', async (req, res) => {
   const { event, kind, file } = req.params;
   if (!KINDS[kind]) return res.status(404).end();
   if (PROTECTED_KINDS.has(kind) && !isAdmin(req)) return res.status(403).end();
   if (!/^[A-Za-z0-9._-]+$/.test(file) || file.includes('..')) return res.status(400).end();
-  if (!getEvent(event)) return res.status(404).end();
 
-  const abs = path.join(eventDir(event), KINDS[kind].dir, file);
-  if (!fs.existsSync(abs)) return res.status(404).end();
+  try {
+    if (!(await getEvent(event))) return res.status(404).end();
+  } catch {
+    return res.status(500).end();
+  }
 
-  res.set('Cache-Control', kind === 'thumb' || kind === 'web' ? 'public, max-age=31536000, immutable' : 'private, no-store');
+  const isPublicKind = kind === 'thumb' || kind === 'web';
+  res.set('Cache-Control', isPublicKind ? 'public, max-age=31536000, immutable' : 'private, no-store');
   if (kind === 'print') res.set('Content-Disposition', `attachment; filename="kuva_${file}"`);
-  res.sendFile(abs);
+
+  const dot = file.lastIndexOf('.');
+  const photoId = dot > 0 ? file.slice(0, dot) : file;
+  const ext = dot > 0 ? file.slice(dot + 1) : 'jpg';
+
+  if (media.DRIVER === 'disk') {
+    const abs = path.join(media.eventDir(event), KINDS[kind].dir, file);
+    if (!fs.existsSync(abs)) return res.status(404).end();
+    return res.sendFile(abs);
+  }
+
+  // En la nube el archivo vive en Storage. Los privados los servimos nosotros
+  // en vez de dar una URL firmada, para que la regla de acceso siga siendo
+  // nuestra y no un enlace que alguien pueda reenviar.
+  try {
+    const buf = await media.read(event, kind, photoId, ext);
+    res.type(ext === 'png' ? 'image/png' : 'image/jpeg').send(buf);
+  } catch {
+    res.status(404).end();
+  }
 });
 
 /* ──────────────────────────────── rutas API ──────────────────────────────── */
@@ -73,16 +96,18 @@ app.get('/u/:slug?', (req, res) => sendPage(res, 'upload'));
 /** Panel del logístico. */
 app.get('/admin', (req, res) => sendPage(res, 'admin'));
 
-app.get('/', (req, res) => {
-  const ev = activeEvent();
+app.get('/', async (req, res) => {
+  const ev = await activeEvent();
   res.redirect(ev ? `/d/${ev.slug}` : '/admin');
 });
 
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
   res.json({
     ok: true,
     uptime: Math.round(process.uptime()),
-    drive: driveSync.queueStats(),
+    store: dbDriver(),
+    media: media.driverInfo(),
+    drive: await driveSync.queueStats().catch(() => ({ configured: false })),
     heic: HEIF_SUPPORTED,
   });
 });
@@ -115,10 +140,21 @@ function banner(ev) {
   console.log(`\n  ${D}El celular debe estar en la misma red Wi-Fi. IP detectada: ${lanIP()}${R}\n`);
 }
 
-async function main() {
-  fs.mkdirSync(config.paths.data, { recursive: true });
+/**
+ * Carga los marcos por PNG. En serverless esto corre en cada arranque en frio
+ * de la funcion, que es barato (leer dos archivos del bundle).
+ */
+export function bootstrapFrames() {
   const overlays = loadOverlayFrames();
   if (overlays.length) log.ok(`marcos personalizados cargados: ${overlays.join(', ')}`);
+}
+
+export { app };
+
+/** Arranque como servidor de verdad (modo evento, en el portatil). */
+async function main() {
+  fs.mkdirSync(config.paths.data, { recursive: true });
+  bootstrapFrames();
 
   const ev = await ensureDefaultEvent();
   driveSync.start();
@@ -126,7 +162,10 @@ async function main() {
   app.listen(config.port, config.host, () => banner(ev));
 }
 
-main().catch((err) => {
-  log.error(`no se pudo arrancar: ${err.stack}`);
-  process.exit(1);
-});
+// En Vercel no arrancamos un listener: api/index.js importa `app` y ya.
+if (!process.env.VERCEL) {
+  main().catch((err) => {
+    log.error(`no se pudo arrancar: ${err.stack}`);
+    process.exit(1);
+  });
+}

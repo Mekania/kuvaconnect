@@ -10,8 +10,14 @@ import { $, api, toast, eventSlugFromUrl, deviceId } from '/shared/kuva.js';
  *  3. 3000 px de lado largo sobra para imprimir a 10x15 (el lienzo es 1800 px).
  */
 
-const MAX_EDGE = 3000;
-const JPEG_QUALITY = 0.92;
+/**
+ * Vercel corta cualquier cuerpo de peticion por encima de ~4.5 MB, y ese limite
+ * no se puede subir. Con 2400 px de lado largo y calidad 0.85 una foto de
+ * celular queda entre 400 KB y 1.2 MB: sobra para imprimir (el hueco del marco
+ * son 1060x1237 px) y entra con margen de sobra.
+ */
+const MAX_EDGE = 2400;
+const JPEG_QUALITY = 0.85;
 
 const slug = eventSlugFromUrl();
 const step = (id) => {

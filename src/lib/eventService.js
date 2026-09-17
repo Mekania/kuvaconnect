@@ -46,9 +46,10 @@ export function frameMeta(event) {
 export async function createEvent(input = {}) {
   const name = (input.name || 'Evento Kuva').trim();
   const base = slugify(input.slug || name);
+  const taken = new Set((await listEvents()).map((e) => e.slug));
   let slug = base;
   let n = 2;
-  while (listEvents().some((e) => e.slug === slug)) slug = `${base}-${n++}`;
+  while (taken.has(slug)) slug = `${base}-${n++}`;
 
   const ev = {
     id: shortId(6),
@@ -74,7 +75,7 @@ export async function createEvent(input = {}) {
     drive: {},
   };
 
-  addEvent(ev);
+  await addEvent(ev);
   await ensureEventDirs(ev.id);
   log.ok(`evento creado: ${ev.name} (${ev.slug})`);
   return ev;
@@ -82,7 +83,7 @@ export async function createEvent(input = {}) {
 
 /** Al arrancar siempre debe existir al menos un evento, para que la pantalla no quede en blanco. */
 export async function ensureDefaultEvent() {
-  const existing = listEvents();
+  const existing = await listEvents();
   if (existing.length) {
     await Promise.all(existing.map((e) => ensureEventDirs(e.id)));
     return existing.find((e) => e.active) || existing[0];
@@ -101,13 +102,14 @@ export async function ensureDefaultEvent() {
   });
 }
 
-export function activeEvent() {
-  const all = listEvents();
+export async function activeEvent() {
+  const all = await listEvents();
   return all.find((e) => e.active) || all[0] || null;
 }
 
-export function setActive(eventId) {
-  for (const e of listEvents()) updateEvent(e.id, { active: e.id === eventId });
+export async function setActive(eventId) {
+  const all = await listEvents();
+  await Promise.all(all.map((e) => updateEvent(e.id, { active: e.id === eventId })));
   return getEvent(eventId);
 }
 

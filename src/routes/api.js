@@ -6,6 +6,7 @@ import { getEvent, getPhoto, countByStatus, listPhotos } from '../lib/db.js';
 import { publicEvent } from '../lib/eventService.js';
 import { ingest, feed, publicPhoto, HEIF_SUPPORTED } from '../lib/photoService.js';
 import { subscribe, clientCount } from '../lib/bus.js';
+import { publicUrl as mediaUrl } from '../lib/media.js';
 import { logger } from '../lib/logger.js';
 
 const log = logger('api');
@@ -17,11 +18,16 @@ const upload = multer({
 });
 
 /** Resuelve :event por id o por slug y lo deja en req.event. */
-function withEvent(req, res, next) {
-  const ev = getEvent(req.params.event);
-  if (!ev) return res.status(404).json({ error: 'Evento no encontrado' });
-  req.event = ev;
-  next();
+async function withEvent(req, res, next) {
+  try {
+    const ev = await getEvent(req.params.event);
+    if (!ev) return res.status(404).json({ error: 'Evento no encontrado' });
+    req.event = ev;
+    next();
+  } catch (err) {
+    log.error(`buscando evento: ${err.message}`);
+    res.status(500).json({ error: 'No se pudo leer el evento' });
+  }
 }
 
 export function uploadUrl(ev) {
@@ -30,24 +36,30 @@ export function uploadUrl(ev) {
 
 /* ─────────────────────────────── evento y feed ───────────────────────────── */
 
-api.get('/event/:event', withEvent, (req, res) => {
+api.get('/event/:event', withEvent, async (req, res) => {
   res.json({
     event: publicEvent(req.event),
-    counts: countByStatus(req.event.id),
+    counts: await countByStatus(req.event.id),
     uploadUrl: uploadUrl(req.event),
     viewers: clientCount(req.event.id),
+    // La pantalla usa SSE donde hay proceso vivo y sondeo en serverless.
+    live: process.env.VERCEL ? 'poll' : 'sse',
   });
 });
 
-api.get('/event/:event/feed', withEvent, (req, res) => {
+api.get('/event/:event/feed', withEvent, async (req, res) => {
   const limit = Math.min(Number.parseInt(req.query.limit, 10) || 200, 500);
-  res.json({ photos: feed(req.event.id, { limit }), counts: countByStatus(req.event.id) });
+  res.json({
+    photos: await feed(req.event.id, { limit }),
+    counts: await countByStatus(req.event.id),
+  });
 });
 
 /** Stream público: solo viajan fotos ya aprobadas. */
-api.get('/event/:event/stream', withEvent, (req, res) => {
+api.get('/event/:event/stream', withEvent, async (req, res) => {
+  const counts = await countByStatus(req.event.id);
   subscribe(req.event.id, res);
-  res.write(`event: hello\ndata: ${JSON.stringify({ event: publicEvent(req.event), counts: countByStatus(req.event.id) })}\n\n`);
+  res.write(`event: hello\ndata: ${JSON.stringify({ event: publicEvent(req.event), counts })}\n\n`);
 });
 
 /* ────────────────────────────────── QR ───────────────────────────────────── */
@@ -111,7 +123,7 @@ api.post('/event/:event/upload', withEvent, (req, res) => {
 
     const device = String(req.body.device || '').slice(0, 40) || 'anon';
     if (ev.maxPerDevice > 0) {
-      const mine = listPhotos(ev.id).filter((p) => p.device === device && p.status !== 'rejected').length;
+      const mine = (await listPhotos(ev.id)).filter((p) => p.device === device && p.status !== 'rejected').length;
       if (mine >= ev.maxPerDevice) {
         return res.status(429).json({ error: `Ya subiste ${mine} fotos. ¡Deja espacio para los demás!` });
       }
@@ -142,8 +154,12 @@ api.post('/event/:event/upload', withEvent, (req, res) => {
 });
 
 /** Estado de una foto, para que el celular avise "ya saliste en pantalla". */
-api.get('/photo/:id/status', (req, res) => {
-  const p = getPhoto(req.params.id);
+api.get('/photo/:id/status', async (req, res) => {
+  const p = await getPhoto(req.params.id);
   if (!p) return res.status(404).json({ error: 'No encontrada' });
-  res.json({ status: p.status, seq: p.seq, url: p.status === 'approved' ? `/media/${p.eventId}/web/${p.id}.jpg` : null });
+  res.json({
+    status: p.status,
+    seq: p.seq,
+    url: p.status === 'approved' ? mediaUrl(p.eventId, 'web', p.id) : null,
+  });
 });

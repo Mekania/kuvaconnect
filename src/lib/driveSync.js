@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import { config } from '../config.js';
 import * as drive from './drive.js';
 import * as media from './media.js';
-import { getEvent, updateEvent, listEvents, getPhoto, photos as photoStore, savePhotos } from './db.js';
+import { getEvent, updateEvent, listEvents, listPhotos, getPhoto, updatePhoto, pendingDrivePhotos } from './db.js';
 import { logger } from './logger.js';
 import { publish } from './bus.js';
 
@@ -29,22 +29,22 @@ const MAX_ATTEMPTS = 6;
 let timer = null;
 let running = false;
 
-export function queueOp(photoId, op) {
-  const p = getPhoto(photoId);
+export async function queueOp(photoId, op) {
+  const p = await getPhoto(photoId);
   if (!p) return;
-  p.drive ||= { state: 'pending', pendingOps: [], attempts: 0 };
-  if (!p.drive.pendingOps.includes(op)) p.drive.pendingOps.push(op);
-  p.drive.state = 'pending';
-  p.drive.attempts = 0;
-  p.drive.nextTryAt = null;
-  savePhotos();
+  const drive = { pendingOps: [], attempts: 0, ...(p.drive || {}) };
+  if (!drive.pendingOps.includes(op)) drive.pendingOps = [...drive.pendingOps, op];
+  drive.state = 'pending';
+  drive.attempts = 0;
+  drive.nextTryAt = null;
+  await updatePhoto(photoId, { drive });
 }
 
 /** Carpetas del evento en Drive, creándolas la primera vez. */
 async function foldersFor(event) {
   if (event.drive?.folders?.toPrint) return event.drive.folders;
   const folders = await drive.ensureEventFolders(event);
-  updateEvent(event.id, { drive: { ...(event.drive || {}), folders, linkedAt: new Date().toISOString() } });
+  await updateEvent(event.id, { drive: { ...(event.drive || {}), folders, linkedAt: new Date().toISOString() } });
   log.ok(`carpetas de Drive listas para "${event.name}"`);
   return folders;
 }
@@ -119,9 +119,8 @@ async function tick() {
   running = true;
   try {
     const now = Date.now();
-    const pending = photoStore.data.photos.filter(
-      (p) => p.drive?.pendingOps?.length && (!p.drive.nextTryAt || p.drive.nextTryAt <= now),
-    );
+    const all = await pendingDrivePhotos(40);
+    const pending = all.filter((p) => !p.drive.nextTryAt || p.drive.nextTryAt <= now);
     if (!pending.length) return;
 
     const byEvent = new Map();
@@ -131,7 +130,7 @@ async function tick() {
     }
 
     for (const [eventId, rows] of byEvent) {
-      const event = getEvent(eventId);
+      const event = await getEvent(eventId);
       if (!event) continue;
       let folders;
       try {
@@ -152,7 +151,7 @@ async function tick() {
           photo.drive.attempts = 0;
           photo.drive.lastError = null;
           photo.drive.lastSyncAt = new Date().toISOString();
-          savePhotos();
+          await updatePhoto(photo.id, { drive: photo.drive });
           // Al canal del panel, no al público: aquí solo viaja estado de Drive.
           publish(`${eventId}:admin`, 'photo:updated', drivePatch(photo));
         } catch (err) {
@@ -161,7 +160,7 @@ async function tick() {
           photo.drive.state = photo.drive.attempts >= MAX_ATTEMPTS ? 'error' : 'pending';
           // backoff exponencial: 15s, 30s, 1m, 2m, 4m…
           photo.drive.nextTryAt = now + Math.min(15000 * 2 ** photo.drive.attempts, 300000);
-          savePhotos();
+          await updatePhoto(photo.id, { drive: photo.drive });
           log.warn(`falló ${photo.id} (intento ${photo.drive.attempts}): ${err.message}`);
         }
       }
@@ -183,6 +182,12 @@ function drivePatch(p) {
 
 export function start() {
   if (timer) return;
+  if (process.env.VERCEL) {
+    // En serverless no hay proceso entre peticiones: la cola se drena en cada
+    // aprobación y con el botón "Sincronizar ahora" del panel.
+    log.info('modo serverless: la sincronización con Drive corre por petición');
+    return;
+  }
   timer = setInterval(tick, config.drive.syncIntervalMs);
   timer.unref?.();
   if (drive.isConfigured()) {
@@ -200,35 +205,37 @@ export function stop() {
 
 export function syncNow() { return tick(); }
 
-export function queueStats() {
+export async function queueStats() {
   let pending = 0; let errored = 0; let synced = 0;
-  for (const p of photoStore.data.photos) {
-    if (p.drive?.pendingOps?.length) pending++;
-    else if (p.drive?.state === 'error') errored++;
-    else if (p.drive?.state === 'synced') synced++;
+  for (const ev of await listEvents()) {
+    for (const p of await listPhotos(ev.id)) {
+      if (p.drive?.pendingOps?.length) pending++;
+      else if (p.drive?.state === 'error') errored++;
+      else if (p.drive?.state === 'synced') synced++;
+    }
   }
   return { pending, errored, synced, configured: drive.isConfigured(), mode: drive.authMode() };
 }
 
 /** Reencola todo lo que quedó a medias — útil cuando por fin se conectan las credenciales. */
-export function requeueAll() {
+export async function requeueAll() {
   let n = 0;
-  for (const ev of listEvents()) {
-    for (const p of photoStore.data.photos.filter((x) => x.eventId === ev.id)) {
+  for (const ev of await listEvents()) {
+    for (const p of await listPhotos(ev.id)) {
       const ops = [];
       if (!p.drive?.originalId) ops.push(OPS.UPLOAD_ORIGINAL);
       if (p.status === 'approved' && !p.drive?.printId) ops.push(OPS.UPLOAD_PRINT);
       if (p.status === 'rejected') ops.push(OPS.MOVE_REJECTED);
       if (!ops.length) continue;
-      p.drive ||= { state: 'pending', pendingOps: [], attempts: 0 };
-      p.drive.pendingOps = [...new Set([...(p.drive.pendingOps || []), ...ops])];
-      p.drive.state = 'pending';
-      p.drive.attempts = 0;
-      p.drive.nextTryAt = null;
+      const d = { pendingOps: [], attempts: 0, ...(p.drive || {}) };
+      d.pendingOps = [...new Set([...(d.pendingOps || []), ...ops])];
+      d.state = 'pending';
+      d.attempts = 0;
+      d.nextTryAt = null;
+      await updatePhoto(p.id, { drive: d });
       n++;
     }
   }
-  savePhotos();
   log.info(`${n} fotos reencoladas para Drive`);
   return n;
 }
