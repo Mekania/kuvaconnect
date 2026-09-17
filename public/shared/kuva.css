@@ -1,0 +1,266 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   KuvaConnect · sistema visual
+   Tematizado para OXXO "Exprésate 24/7": magenta de campaña, blanco papel,
+   amarillo y rojo del logo. Todo son tokens, así que el próximo evento se
+   reskinea cambiando este bloque y nada más.
+
+   Tipografía: SOLO fuentes del sistema. En un salón de eventos el internet se
+   cae o no existe, y una pantalla esperando a Google Fonts es una pantalla en
+   blanco frente a 200 personas.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* marca */
+  --brand: #C41D5D;
+  --brand-deep: #A01049;
+  --brand-dark: #6E0730;
+  --hot: #E8447F;
+  --gold: #E9B62B;
+  --oxxo-red: #E31B23;
+
+  /* superficies */
+  --paper: #FFF7FA;
+  --paper-2: #FFFFFF;
+  --sand: #FDEAF1;
+
+  /* texto */
+  --ink: #3A0A21;
+  --ink-soft: rgba(58, 10, 33, 0.66);
+  --ink-faint: rgba(58, 10, 33, 0.42);
+
+  /* texto sobre magenta */
+  --on-brand: #FFFFFF;
+  --on-brand-soft: rgba(255, 255, 255, 0.78);
+  --on-brand-faint: rgba(255, 255, 255, 0.52);
+
+  --line: rgba(58, 10, 33, 0.12);
+  --line-brand: rgba(255, 255, 255, 0.28);
+
+  --ok: #19A974;
+  --warn: #E9942B;
+  --bad: #E0324B;
+
+  --sans: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+
+  --r-sm: 12px;
+  --r-md: 20px;
+  --r-lg: 30px;
+
+  --shadow: 0 22px 60px rgba(110, 7, 48, 0.28);
+  --shadow-soft: 0 8px 26px rgba(110, 7, 48, 0.16);
+  --shadow-pop: 0 14px 0 rgba(110, 7, 48, 0.22);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body { min-height: 100dvh; }
+
+h1, h2, h3 {
+  margin: 0;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  line-height: 1.03;
+}
+
+a { color: var(--brand); text-decoration: none; font-weight: 700; }
+
+button, input, select, textarea { font-family: inherit; font-size: inherit; color: inherit; }
+
+/** Etiqueta pequeña en mayúsculas, el "kicker" de la campaña. */
+.eyebrow {
+  font-size: 0.72rem;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  font-weight: 800;
+  color: var(--brand);
+}
+.on-brand .eyebrow { color: var(--on-brand-soft); }
+
+/* ───────────────────────────────── botones ──────────────────────────────── */
+
+/**
+ * Botones con "peso": sombra dura abajo que se hunde al presionar.
+ * Se leen como algo físico, que es el tono de la campaña.
+ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55em;
+  border: 0;
+  background: var(--paper-2);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 0.9em 1.6em;
+  font-weight: 800;
+  font-size: 0.98rem;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  box-shadow: 0 4px 0 rgba(110, 7, 48, 0.18);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.18s ease, opacity 0.18s;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 0 rgba(110, 7, 48, 0.18); }
+.btn:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 1px 0 rgba(110, 7, 48, 0.18); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+
+.btn-brand { background: var(--brand); color: #fff; box-shadow: 0 4px 0 var(--brand-dark); }
+.btn-brand:hover:not(:disabled) { background: var(--hot); box-shadow: 0 6px 0 var(--brand-dark); }
+.btn-brand:active:not(:disabled) { box-shadow: 0 1px 0 var(--brand-dark); }
+
+.btn-gold { background: var(--gold); color: #40300A; box-shadow: 0 4px 0 #A87E12; }
+.btn-gold:active:not(:disabled) { box-shadow: 0 1px 0 #A87E12; }
+
+.btn-green { background: var(--ok); color: #fff; box-shadow: 0 4px 0 #0E6B4A; }
+.btn-green:active:not(:disabled) { box-shadow: 0 1px 0 #0E6B4A; }
+
+.btn-red { background: var(--bad); color: #fff; box-shadow: 0 4px 0 #8E1A2B; }
+.btn-red:active:not(:disabled) { box-shadow: 0 1px 0 #8E1A2B; }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--ink-soft);
+  box-shadow: inset 0 0 0 2px var(--line);
+}
+.btn-ghost:hover:not(:disabled) { background: rgba(58, 10, 33, 0.04); box-shadow: inset 0 0 0 2px var(--line); transform: none; }
+.btn-ghost:active:not(:disabled) { transform: scale(0.98); box-shadow: inset 0 0 0 2px var(--line); }
+
+/* Sobre fondo magenta */
+.on-brand .btn-ghost { color: var(--on-brand); box-shadow: inset 0 0 0 2px var(--line-brand); }
+.on-brand .btn-ghost:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); box-shadow: inset 0 0 0 2px var(--line-brand); }
+
+.btn-sm { padding: 0.55em 1.05em; font-size: 0.84rem; box-shadow: 0 3px 0 rgba(110, 7, 48, 0.16); }
+.btn-block { width: 100%; }
+
+/* ─────────────────────────────── formularios ────────────────────────────── */
+
+.field { display: flex; flex-direction: column; gap: 0.45rem; }
+.field label { font-size: 0.8rem; font-weight: 800; color: var(--ink-soft); letter-spacing: 0.02em; }
+
+.input, select.input, textarea.input {
+  background: var(--paper-2);
+  border: 2px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 0.8em 1em;
+  outline: none;
+  width: 100%;
+  font-weight: 600;
+  transition: border-color 0.18s, box-shadow 0.18s;
+}
+.input:focus { border-color: var(--brand); box-shadow: 0 0 0 4px rgba(196, 29, 93, 0.14); }
+.input::placeholder { color: var(--ink-faint); font-weight: 500; }
+
+.switch { display: inline-flex; align-items: center; gap: 0.65rem; cursor: pointer; user-select: none; font-weight: 600; }
+.switch input {
+  appearance: none; width: 46px; height: 26px; border-radius: 999px;
+  background: rgba(58, 10, 33, 0.16); position: relative; cursor: pointer;
+  transition: background 0.2s; flex: none;
+}
+.switch input::after {
+  content: ''; position: absolute; top: 3px; left: 3px;
+  width: 20px; height: 20px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s;
+}
+.switch input:checked { background: var(--brand); }
+.switch input:checked::after { transform: translateX(20px); }
+
+/* ───────────────────────────────── piezas ──────────────────────────────── */
+
+.card {
+  background: var(--paper-2);
+  border: 0;
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-soft);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.4em 0.8em;
+  border-radius: 999px;
+  background: var(--sand);
+  color: var(--brand-deep);
+  white-space: nowrap;
+}
+.pill-pending { background: #FFF0D6; color: #8A5A05; }
+.pill-approved { background: #D9F5E9; color: #0E6B4A; }
+.pill-rejected { background: #FFE1E5; color: #8E1A2B; }
+.pill-error { background: #FFE1E5; color: #8E1A2B; }
+.pill-gold { background: var(--gold); color: #40300A; }
+
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ink-faint); flex: none; }
+.dot-live { background: #5BE59A; animation: pulse 2.4s infinite; }
+.dot-off { background: #FFB4BE; }
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(91, 229, 154, 0.6); }
+  70% { box-shadow: 0 0 0 10px rgba(91, 229, 154, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(91, 229, 154, 0); }
+}
+
+.spinner {
+  width: 1.15em; height: 1.15em; flex: none;
+  border: 3px solid rgba(196, 29, 93, 0.2);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Nubes de la campaña, dibujadas en CSS y reutilizables. */
+.cloud {
+  position: absolute;
+  background: #fff;
+  border-radius: 999px;
+  pointer-events: none;
+}
+.cloud::before, .cloud::after {
+  content: '';
+  position: absolute;
+  background: #fff;
+  border-radius: 50%;
+}
+.cloud::before { width: 62%; height: 150%; left: 8%; bottom: 0; }
+.cloud::after { width: 46%; height: 118%; right: 10%; bottom: 0; }
+
+.toast-host {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  display: flex; flex-direction: column; gap: 8px; z-index: 9000; pointer-events: none;
+}
+.toast {
+  background: var(--ink); color: #fff;
+  padding: 0.8em 1.3em; border-radius: 999px; box-shadow: var(--shadow-soft);
+  font-size: 0.92rem; font-weight: 700; animation: toast-in 0.25s ease both;
+}
+.toast-error { background: var(--bad); }
+.toast-ok { background: var(--ok); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(12px) scale(0.96); } }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

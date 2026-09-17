@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>KuvaConnect · Pantalla</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💖</text></svg>">
+<link rel="stylesheet" href="/shared/kuva.css?v=3">
+<style>
+  html, body { height: 100%; overflow: hidden; }
+  :root { --cols-max: 5; }
+
+  body { background: var(--brand); }
+
+  .screen { height: 100dvh; display: flex; flex-direction: column; }
+
+  /* ═════════════════════ franja superior: QR y mensaje ═════════════════════ */
+
+  .stage {
+    position: relative;
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: clamp(20px, 3.4vw, 60px);
+    padding: clamp(20px, 2.6vh, 44px) clamp(24px, 3.2vw, 70px) clamp(34px, 4vh, 60px);
+    background:
+      radial-gradient(120% 140% at 8% 0%, var(--hot) 0%, transparent 55%),
+      var(--brand);
+    overflow: hidden;
+  }
+
+  /* Nubes como las del marco impreso, para que pantalla y foto rimen. */
+  .clouds { position: absolute; inset: 0; pointer-events: none; }
+  .clouds .cloud { opacity: 0.95; }
+  .c1 { width: 13vmin; height: 4.4vmin; top: 9%;  left: 4%; }
+  .c2 { width: 9vmin;  height: 3.2vmin; top: 22%; left: 33%; opacity: .5 !important; }
+  .c3 { width: 16vmin; height: 5vmin;   top: 6%;  right: 6%; }
+  .c4 { width: 8vmin;  height: 2.8vmin; bottom: 22%; right: 27%; opacity: .45 !important; }
+
+  /* Borde inferior ondulado: el magenta "gotea" sobre el álbum. */
+  .stage::after {
+    content: '';
+    position: absolute; left: 0; right: 0; bottom: -1px; height: clamp(18px, 2.4vh, 34px);
+    background: var(--paper);
+    -webkit-mask-image: radial-gradient(circle at 50% 0, transparent 68%, #000 69%);
+    mask-image: radial-gradient(circle at 50% 0, transparent 68%, #000 69%);
+    -webkit-mask-size: clamp(40px, 5vw, 72px) 100%;
+    mask-size: clamp(40px, 5vw, 72px) 100%;
+    -webkit-mask-repeat: repeat-x;
+    mask-repeat: repeat-x;
+  }
+
+  .qr-card {
+    position: relative;
+    flex: none;
+    background: #fff;
+    border-radius: clamp(18px, 1.8vw, 32px);
+    padding: clamp(12px, 1.2vw, 22px);
+    box-shadow: 0 18px 0 rgba(110, 7, 48, .35), 0 30px 70px rgba(0, 0, 0, .3);
+    line-height: 0;
+    animation: bob 5s ease-in-out infinite;
+  }
+  .qr-card img { display: block; width: clamp(150px, 19vmin, 300px); height: auto; }
+  .qr-card .tab {
+    position: absolute; top: -1.15em; left: 50%; transform: translateX(-50%) rotate(-2deg);
+    background: var(--gold); color: #40300A;
+    font-size: clamp(.6rem, 1.15vmin, .8rem); font-weight: 900; letter-spacing: .16em;
+    padding: .45em 1em; border-radius: 999px; white-space: nowrap;
+    box-shadow: 0 4px 0 #A87E12;
+  }
+  @keyframes bob { 0%, 100% { transform: translateY(0) rotate(-1deg); } 50% { transform: translateY(-9px) rotate(1deg); } }
+
+  .pitch { position: relative; min-width: 0; display: flex; flex-direction: column; gap: clamp(8px, 1.1vh, 16px); color: var(--on-brand); }
+  .pitch h1 {
+    font-size: clamp(1.9rem, 5.4vmin, 4.4rem);
+    text-transform: uppercase;
+    text-shadow: 0 4px 0 rgba(110, 7, 48, .3);
+  }
+  .pitch h1 b { color: var(--gold); font-weight: 900; }
+  .pitch .sub { color: var(--on-brand-soft); font-size: clamp(.9rem, 1.9vmin, 1.4rem); font-weight: 600; }
+
+  .steps { display: flex; flex-wrap: wrap; align-items: center; gap: clamp(8px, 1.5vw, 20px); margin: 0; padding: 0; list-style: none; }
+  .steps li {
+    display: flex; align-items: center; gap: .55em;
+    font-size: clamp(.74rem, 1.6vmin, 1.12rem); font-weight: 800;
+    background: rgba(255, 255, 255, .14);
+    padding: .42em .95em .42em .42em; border-radius: 999px;
+  }
+  .steps b {
+    display: grid; place-items: center;
+    width: 1.75em; height: 1.75em; border-radius: 50%;
+    background: var(--gold); color: #40300A; font-size: .92em; font-weight: 900; flex: none;
+  }
+
+  .meta { display: flex; align-items: center; gap: clamp(12px, 1.8vw, 26px); flex-wrap: wrap; }
+  .count {
+    display: inline-flex; align-items: baseline; gap: .45em;
+    background: #fff; color: var(--brand-deep);
+    padding: .3em 1em; border-radius: 999px; box-shadow: 0 5px 0 rgba(110, 7, 48, .3);
+  }
+  .count strong { font-size: clamp(1.1rem, 2.7vmin, 2rem); font-weight: 900; font-variant-numeric: tabular-nums; }
+  .count span { font-size: clamp(.58rem, 1.15vmin, .8rem); letter-spacing: .14em; text-transform: uppercase; font-weight: 800; }
+  .live {
+    display: inline-flex; align-items: center; gap: .5em;
+    font-size: clamp(.6rem, 1.2vmin, .82rem); letter-spacing: .2em;
+    text-transform: uppercase; color: var(--on-brand-soft); font-weight: 800;
+  }
+
+  .brandmark { margin-left: auto; flex: none; display: grid; gap: .5em; justify-items: center; }
+  .brandmark img { width: clamp(90px, 12vmin, 190px); height: auto; display: block; filter: drop-shadow(0 8px 16px rgba(0,0,0,.25)); }
+
+  /* ════════════════════════════════ álbum ════════════════════════════════ */
+
+  /*
+    Grilla de celdas iguales, no mampostería. En una pantalla de altura fija la
+    mampostería siempre termina cortando la última fila, y una foto cortada en
+    el evento se ve como un error. Aquí el JS calcula cuántas columnas y filas
+    caben completas y solo se muestran esas; el resto sale del DOM.
+  */
+  .album {
+    flex: 1; min-height: 0; overflow: hidden;
+    background: var(--paper);
+    padding: clamp(16px, 2vw, 36px);
+    display: grid;
+    grid-template-columns: repeat(var(--cols, 4), 1fr);
+    grid-auto-rows: 1fr;
+    gap: clamp(12px, 1.4vw, 24px);
+    align-content: center; justify-content: center;
+    align-items: center; justify-items: center;
+  }
+
+  .shot {
+    max-width: 100%; max-height: 100%;
+    border-radius: clamp(8px, .7vw, 14px);
+    overflow: hidden;
+    background: #fff;
+    box-shadow: 0 10px 26px rgba(110, 7, 48, .18);
+    position: relative;
+    rotate: var(--tilt, 0deg);
+    animation: drop-in .65s cubic-bezier(.2, .9, .25, 1) both;
+    transition: rotate .4s ease;
+  }
+  .shot img { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; }
+  .shot.fresh {
+    box-shadow: 0 0 0 5px var(--gold), 0 16px 40px rgba(110, 7, 48, .3);
+    rotate: 0deg;
+  }
+  .shot .who {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    padding: 1.8em .85em .65em;
+    background: linear-gradient(transparent, rgba(58, 10, 33, .82));
+    color: #fff;
+    font-size: clamp(.62rem, 1.1vmin, .86rem);
+    font-weight: 700;
+    display: flex; gap: .45em; align-items: baseline;
+    opacity: 0; animation: fade-in .5s .35s both;
+  }
+  .shot .who em { font-style: normal; color: var(--gold); font-weight: 900; }
+
+  @keyframes drop-in {
+    from { opacity: 0; transform: translateY(-20px) scale(.9); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes fade-in { to { opacity: 1; } }
+
+  .empty {
+    grid-column: 1 / -1;
+    height: 100%; width: 100%;
+    display: grid; place-content: center; justify-items: center; gap: 1.1rem;
+    text-align: center; color: var(--ink-soft);
+  }
+  .empty .ring {
+    width: clamp(90px, 12vmin, 160px); aspect-ratio: 1; border-radius: 50%;
+    background: var(--sand);
+    display: grid; place-items: center; font-size: clamp(2.2rem, 5vmin, 4rem);
+    animation: breathe 3.4s ease-in-out infinite;
+  }
+  .empty .big { font-weight: 900; font-size: clamp(1.4rem, 3.8vmin, 2.8rem); color: var(--brand); text-transform: uppercase; }
+  @keyframes breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.07); } }
+
+  /* ═══════════════════ celebración de la foto que acaba de entrar ══════════ */
+
+  .hero {
+    position: fixed; inset: 0; z-index: 50;
+    display: grid; place-items: center;
+    background: radial-gradient(70% 70% at 50% 45%, rgba(196, 29, 93, .93), rgba(110, 7, 48, .97));
+    opacity: 0; pointer-events: none;
+    transition: opacity .4s ease;
+  }
+  .hero.on { opacity: 1; }
+  .hero figure {
+    margin: 0; display: grid; justify-items: center; gap: clamp(14px, 2.2vh, 28px);
+    transform: scale(.82) rotate(-3deg);
+    transition: transform .55s cubic-bezier(.2, 1.3, .4, 1);
+  }
+  .hero.on figure { transform: none; }
+  .hero img {
+    max-height: 68dvh; max-width: 80vw; width: auto; height: auto;
+    border-radius: 10px;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, .5), 0 0 0 8px #fff;
+  }
+  .hero .tag {
+    background: var(--gold); color: #40300A;
+    font-size: clamp(.7rem, 1.5vmin, 1rem); letter-spacing: .24em; text-transform: uppercase;
+    font-weight: 900; padding: .5em 1.3em; border-radius: 999px;
+    box-shadow: 0 5px 0 #A87E12;
+  }
+  .hero figcaption { text-align: center; display: grid; gap: .5em; justify-items: center; color: #fff; }
+  .hero .cap { font-weight: 900; font-size: clamp(1.2rem, 3.2vmin, 2.4rem); }
+  .hero .by { color: var(--on-brand-soft); font-size: clamp(.85rem, 1.7vmin, 1.2rem); font-weight: 700; }
+
+  /* Confeti de corazones en la celebración. */
+  .confetti { position: fixed; inset: 0; z-index: 51; pointer-events: none; overflow: hidden; }
+  .confetti i {
+    position: absolute; top: -8vh;
+    font-size: var(--sz, 2rem); font-style: normal;
+    animation: fall var(--dur, 3s) linear var(--del, 0s) forwards;
+  }
+  @keyframes fall {
+    to { transform: translateY(118vh) rotate(var(--rot, 360deg)); opacity: .1; }
+  }
+
+  /* ═════════════════════════════ orientaciones ═════════════════════════════ */
+
+  /* Pantalla vertical (cabina espejada, tótem): QR arriba, álbum abajo. */
+  @media (orientation: portrait) {
+    .stage { flex-direction: column; text-align: center; gap: clamp(16px, 2.2vh, 30px); }
+    .pitch { align-items: center; }
+    .steps, .meta { justify-content: center; }
+    .brandmark { margin-left: 0; }
+    .qr-card img { width: clamp(180px, 30vmin, 420px); }
+  }
+
+  .offline-bar {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: 16px; z-index: 60;
+    background: var(--bad); color: #fff;
+    padding: .6em 1.3em; border-radius: 999px; font-size: .85rem; font-weight: 800;
+    box-shadow: var(--shadow-soft);
+    display: none;
+  }
+  .offline .offline-bar { display: block; }
+</style>
+</head>
+<body>
+  <div class="screen">
+    <header class="stage on-brand">
+      <div class="clouds">
+        <i class="cloud c1"></i><i class="cloud c2"></i><i class="cloud c3"></i><i class="cloud c4"></i>
+      </div>
+
+      <div class="qr-card">
+        <div class="tab">ESCANÉAME</div>
+        <img id="qr" alt="Código QR para subir tu foto">
+      </div>
+
+      <div class="pitch">
+        <p class="eyebrow" id="eyebrow">Exprésate 24/7</p>
+        <h1 id="title">Cargando…</h1>
+        <p class="sub" id="subtitle"></p>
+        <ol class="steps">
+          <li><b>1</b> Escanea</li>
+          <li><b>2</b> Sube tu foto</li>
+          <li><b>3</b> Sal en pantalla</li>
+        </ol>
+        <div class="meta">
+          <div class="count"><strong id="count">0</strong> <span>fotos</span></div>
+          <div class="live"><i class="dot dot-live" id="dot"></i> <span id="liveLabel">En vivo</span></div>
+        </div>
+      </div>
+
+      <div class="brandmark">
+        <img src="/shared/brand/oxxo.webp" alt="OXXO" id="brandLogo">
+      </div>
+    </header>
+
+    <main class="album" id="album" aria-live="polite"></main>
+  </div>
+
+  <div class="hero" id="hero" aria-hidden="true">
+    <figure>
+      <div class="tag">¡Nueva foto!</div>
+      <img id="heroImg" alt="">
+      <figcaption>
+        <div class="cap" id="heroCap"></div>
+        <div class="by" id="heroBy"></div>
+      </figcaption>
+    </figure>
+  </div>
+  <div class="confetti" id="confetti" aria-hidden="true"></div>
+
+  <div class="offline-bar">Reconectando con el servidor…</div>
+
+  <script type="module" src="/display/display.js?v=3"></script>
+</body>
+</html>

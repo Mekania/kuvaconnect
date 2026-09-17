@@ -1,0 +1,25 @@
+{
+  "name": "kuvaconnect",
+  "version": "0.1.0",
+  "private": true,
+  "description": "KuvaConnect — pantalla QR + subida movil + moderacion + impresion enmarcada. Producto de Kuva (cabinas de fotos).",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "frames:preview": "node scripts/preview-frames.js",
+    "drive:check": "node scripts/drive-check.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "googleapis": "^144.0.0",
+    "multer": "^2.4.0",
+    "qrcode": "^1.5.4",
+    "sharp": "^0.33.5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

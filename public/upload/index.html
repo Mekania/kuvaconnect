@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#C41D5D">
+<meta name="robots" content="noindex">
+<title>Sube tu foto · KuvaConnect</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💖</text></svg>">
+<link rel="stylesheet" href="/shared/kuva.css?v=3">
+<style>
+  body {
+    background: var(--brand);
+    display: flex; flex-direction: column;
+    min-height: 100dvh;
+  }
+
+  /* ════════════════════════════ cabecera magenta ═══════════════════════════ */
+
+  .top {
+    position: relative;
+    padding: calc(env(safe-area-inset-top) + 22px) 20px 42px;
+    text-align: center;
+    color: var(--on-brand);
+    background: radial-gradient(130% 120% at 50% 0%, var(--hot) 0%, transparent 60%), var(--brand);
+    overflow: hidden;
+  }
+  .top .cloud { opacity: .9; }
+  .cl1 { width: 78px; height: 26px; top: 26%; left: -16px; }
+  .cl2 { width: 54px; height: 18px; top: 14%; right: 8px; opacity: .55 !important; }
+
+  .top .logo { width: 108px; height: auto; display: block; margin: 0 auto 14px; filter: drop-shadow(0 6px 12px rgba(0,0,0,.22)); }
+  .top h1 { font-size: clamp(1.6rem, 8vw, 2.3rem); text-transform: uppercase; text-shadow: 0 3px 0 rgba(110,7,48,.32); position: relative; }
+  .top .sub { margin: .55rem 0 0; color: var(--on-brand-soft); font-size: .98rem; font-weight: 600; position: relative; }
+  .top .eyebrow { position: relative; }
+
+  /* Borde ondulado que entrega el magenta a la hoja blanca. */
+  .top::after {
+    content: '';
+    position: absolute; left: 0; right: 0; bottom: -1px; height: 20px;
+    background: var(--paper);
+    -webkit-mask-image: radial-gradient(circle at 50% 0, transparent 68%, #000 69%);
+    mask-image: radial-gradient(circle at 50% 0, transparent 68%, #000 69%);
+    -webkit-mask-size: 44px 100%; mask-size: 44px 100%;
+    -webkit-mask-repeat: repeat-x; mask-repeat: repeat-x;
+  }
+
+  /* ══════════════════════════════ hoja blanca ══════════════════════════════ */
+
+  .sheet {
+    flex: 1;
+    background: var(--paper);
+    padding: 26px 20px calc(env(safe-area-inset-bottom) + 26px);
+    display: flex; flex-direction: column;
+  }
+  .wrap { width: 100%; max-width: 480px; margin: 0 auto; flex: 1; display: flex; flex-direction: column; }
+
+  .step { display: none; flex: 1; flex-direction: column; gap: 20px; animation: rise .35s ease both; }
+  .step.on { display: flex; }
+  @keyframes rise { from { opacity: 0; transform: translateY(14px); } }
+
+  /* ─────────────────────────────── elegir foto ───────────────────────────── */
+
+  .picker {
+    border: 3px dashed rgba(196, 29, 93, .4);
+    border-radius: var(--r-lg);
+    background: var(--paper-2);
+    padding: 38px 22px;
+    text-align: center;
+    display: grid; gap: 12px; justify-items: center;
+    cursor: pointer;
+    box-shadow: var(--shadow-soft);
+    transition: transform .14s ease, border-color .2s;
+  }
+  .picker:active { transform: scale(.985); border-color: var(--brand); }
+  .picker .icon {
+    width: 76px; height: 76px; border-radius: 50%;
+    background: var(--brand); color: #fff;
+    display: grid; place-items: center; font-size: 2.3rem;
+    box-shadow: 0 6px 0 var(--brand-dark);
+  }
+  .picker strong { font-size: 1.22rem; font-weight: 900; }
+  .picker span { color: var(--ink-soft); font-size: .92rem; font-weight: 600; }
+
+  .tips { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+  .tips li {
+    display: flex; gap: .75em; align-items: flex-start;
+    color: var(--ink-soft); font-size: .9rem; line-height: 1.45; font-weight: 600;
+  }
+  .tips li i { font-style: normal; flex: none; font-size: 1.1em; }
+
+  /* ─────────────────────────────── vista previa ──────────────────────────── */
+
+  .preview {
+    border-radius: var(--r-md); overflow: hidden;
+    background: var(--paper-2);
+    display: grid; place-items: center;
+    max-height: 44dvh;
+    box-shadow: var(--shadow-soft);
+    padding: 8px;
+  }
+  .preview img { display: block; max-width: 100%; max-height: calc(44dvh - 16px); width: auto; height: auto; border-radius: 10px; }
+
+  .fields { display: grid; gap: 14px; }
+  .actions { display: grid; gap: 10px; margin-top: auto; padding-top: 14px; }
+
+  /* ──────────────────────────────── subiendo ─────────────────────────────── */
+
+  .uploading { display: grid; place-items: center; gap: 22px; flex: 1; text-align: center; align-content: center; }
+  .uploading .big { font-weight: 900; font-size: 1.4rem; }
+  .bar { width: 100%; max-width: 300px; height: 12px; border-radius: 999px; background: var(--sand); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, var(--brand), var(--hot)); transition: width .25s ease; }
+
+  /* ───────────────────────────────── listo ──────────────────────────────── */
+
+  .done { display: grid; gap: 16px; justify-items: center; text-align: center; flex: 1; align-content: start; }
+  .done .seal {
+    width: 84px; height: 84px; border-radius: 50%;
+    display: grid; place-items: center; font-size: 2.4rem;
+    background: var(--gold); color: #40300A;
+    box-shadow: 0 7px 0 #A87E12;
+    animation: pop .5s cubic-bezier(.2, 1.5, .4, 1) both;
+  }
+  @keyframes pop { from { transform: scale(.3) rotate(-25deg); opacity: 0; } }
+  .done h2 { font-size: 1.7rem; text-transform: uppercase; color: var(--brand); }
+  .done p { margin: 0; color: var(--ink-soft); font-size: .96rem; line-height: 1.5; font-weight: 600; }
+  .result {
+    border-radius: 12px; overflow: hidden; max-width: 250px;
+    box-shadow: var(--shadow), 0 0 0 6px #fff;
+  }
+  .result img { display: block; width: 100%; height: auto; }
+
+  .closed { text-align: center; display: grid; gap: 14px; place-content: center; flex: 1; color: var(--ink-soft); }
+  .closed h2 { color: var(--brand); text-transform: uppercase; }
+
+  footer.mark {
+    text-align: center; padding: 22px 20px 4px;
+    font-size: .64rem; letter-spacing: .28em; text-transform: uppercase;
+    color: var(--ink-faint); font-weight: 800;
+  }
+</style>
+</head>
+<body>
+  <header class="top on-brand">
+    <i class="cloud cl1"></i><i class="cloud cl2"></i>
+    <img class="logo" src="/shared/brand/oxxo.webp" alt="OXXO" id="brandLogo">
+    <p class="eyebrow" id="eyebrow">Exprésate 24/7</p>
+    <h1 id="title">Cargando…</h1>
+    <p class="sub" id="subtitle"></p>
+  </header>
+
+  <div class="sheet">
+    <div class="wrap">
+
+      <!-- 1. elegir -->
+      <section class="step on" id="stepPick">
+        <label class="picker" for="file">
+          <div class="icon">📸</div>
+          <strong>Elige tu foto</strong>
+          <span>Toma una nueva o escoge una de tu galería</span>
+        </label>
+        <input type="file" id="file" accept="image/*" class="visually-hidden">
+        <ul class="tips">
+          <li><i>🖼️</i> Vertical u horizontal: la acomodamos al marco automáticamente.</li>
+          <li id="tipModeration"><i>👀</i> Un moderador la revisa antes de que salga en pantalla.</li>
+          <li><i>🖨️</i> Se imprime en 10×15 cm con el marco del evento.</li>
+        </ul>
+      </section>
+
+      <!-- 2. revisar y enviar -->
+      <section class="step" id="stepReview">
+        <div class="preview"><img id="previewImg" alt="Vista previa de tu foto"></div>
+        <div class="fields">
+          <div class="field" id="authorField">
+            <label for="author">Tu nombre <span style="color:var(--ink-faint);font-weight:600">(opcional)</span></label>
+            <input class="input" id="author" maxlength="40" placeholder="Cómo quieres aparecer" autocomplete="name">
+          </div>
+          <div class="field" id="captionField">
+            <label for="caption">Tu mensaje <span style="color:var(--ink-faint);font-weight:600">(opcional)</span></label>
+            <input class="input" id="caption" maxlength="120" placeholder="Exprésate…">
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-brand btn-block" id="send">Enviar a la pantalla</button>
+          <button class="btn btn-ghost btn-block" id="another">Elegir otra foto</button>
+        </div>
+      </section>
+
+      <!-- 3. subiendo -->
+      <section class="step" id="stepUploading">
+        <div class="uploading">
+          <div class="spinner" style="width:2.6rem;height:2.6rem;border-width:4px"></div>
+          <div class="big">Enviando tu foto…</div>
+          <div class="bar"><i id="bar"></i></div>
+          <p style="color:var(--ink-soft);font-size:.88rem;margin:0;font-weight:600">No cierres esta pantalla</p>
+        </div>
+      </section>
+
+      <!-- 4. listo -->
+      <section class="step" id="stepDone">
+        <div class="done">
+          <div class="seal">✓</div>
+          <h2 id="doneTitle">¡Listo!</h2>
+          <p id="doneMsg"></p>
+          <div class="result" id="resultBox" hidden><img id="resultImg" alt="Tu foto con el marco del evento"></div>
+          <p style="font-size:.85rem" id="doneHint"></p>
+          <div class="actions" style="width:100%">
+            <button class="btn btn-block" id="again">Subir otra foto</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- subidas cerradas -->
+      <section class="step" id="stepClosed">
+        <div class="closed">
+          <div style="font-size:3rem">🔒</div>
+          <h2>Subidas cerradas</h2>
+          <p style="font-weight:600">Acércate al equipo de Kuva si necesitas ayuda.</p>
+        </div>
+      </section>
+
+      <footer class="mark">Kuva · KuvaConnect</footer>
+    </div>
+  </div>
+
+  <script type="module" src="/upload/upload.js?v=3"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "name": "OXXO · Exprésate 24/7",
+  "description": "Marco oficial de la campaña. Lienzo 1182x1772 px = 10x15 cm exactos a 300 dpi. El lockup Exprésate 24/7 se monta sobre el borde superior de la foto a propósito.",
+  "paper": "#C41D5D",
+  "portrait": {
+    "canvas": { "w": 1182, "h": 1772 },
+    "window": { "x": 63, "y": 258, "w": 1060, "h": 1237, "radius": 0 },
+    "file": "portrait.png"
+  },
+  "landscape": {
+    "canvas": { "w": 1772, "h": 1182 },
+    "window": { "x": 70, "y": 121, "w": 1627, "h": 846, "radius": 0 },
+    "file": "landscape.png"
+  }
+}
