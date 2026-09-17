@@ -63,13 +63,35 @@ export async function queueOp(photoId, op) {
   await updatePhoto(photoId, { drive });
 }
 
-/** Carpetas del evento en Drive, creándolas la primera vez. */
+/**
+ * Carpetas del evento en Drive, creándolas la primera vez.
+ *
+ * Además escribe la configuración del evento en la descripción de su carpeta.
+ * Eso es lo que el modo nube lee para reconocerla como evento: si el modo
+ * evento (local) no lo hiciera, la misma carpeta la vería Drive como una
+ * carpeta cualquiera y el evento no existiría al desplegar. Así los dos modos
+ * hablan del mismo evento aunque cada uno guarde su estado donde le sirve.
+ */
 async function foldersFor(event) {
   if (event.drive?.folders?.toPrint) return event.drive.folders;
   const folders = await drive.ensureEventFolders(event);
   await updateEvent(event.id, { drive: { ...(event.drive || {}), folders, linkedAt: new Date().toISOString() } });
+  await publishEventConfig(event, folders.eventFolder);
   log.ok(`carpetas de Drive listas para "${event.name}"`);
   return folders;
+}
+
+/** Deja la configuración del evento legible desde Drive. */
+export async function publishEventConfig(event, folderId) {
+  const { drive: _omit, ...clean } = event;
+  try {
+    await drive.setMeta(folderId, {
+      description: JSON.stringify(clean),
+      appProperties: { kuvaEvent: '1', kid: event.id, slug: event.slug },
+    });
+  } catch (err) {
+    log.warn(`no se pudo publicar la config de "${event.name}": ${err.message}`);
+  }
 }
 
 function printName(event, photo) {
