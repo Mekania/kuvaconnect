@@ -74,7 +74,12 @@ export function oauthClient() {
     const c = raw.installed || raw.web || raw;
     clientId = clientId || c.client_id;
     clientSecret = clientSecret || c.client_secret;
-    if (c.redirect_uris?.length && !process.env.GOOGLE_OAUTH_REDIRECT) redirect = c.redirect_uris[0];
+    // Solo un cliente de tipo "web" trae una URI de redirección que sirva. Los
+    // de escritorio traen "http://localhost" sin puerto, y Google acepta
+    // cualquier puerto de loopback para ese tipo, así que usamos el nuestro.
+    if (raw.web && c.redirect_uris?.length && !process.env.GOOGLE_OAUTH_REDIRECT) {
+      redirect = c.redirect_uris.find((u) => u.includes('oauth2callback')) || c.redirect_uris[0];
+    }
   }
   if (!clientId || !clientSecret) throw new Error('Falta el cliente OAuth (credentials/oauth-client.json)');
   return new google.auth.OAuth2(clientId, clientSecret, redirect);

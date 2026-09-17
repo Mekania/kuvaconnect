@@ -184,7 +184,10 @@ export async function approve(photoId, by = 'panel') {
     status: 'approved', approvedAt: new Date().toISOString(), moderatedBy: by, rejectedReason: null,
   });
   await queueOp(photoId, OPS.UPLOAD_PRINT);
-  if (was === 'rejected') await queueOp(photoId, OPS.UPLOAD_ORIGINAL);
+  if (was === 'rejected') {
+    await queueOp(photoId, OPS.UPLOAD_ORIGINAL);
+    await queueOp(photoId, OPS.MOVE_APPROVED); // devolverlo a 01_Originales
+  }
   await media.onApproved(updated).catch((err) => log.warn(`mover impresión: ${err.message}`));
   publish(p.eventId, 'photo:new', publicPhoto(updated));
   publish(adminChannel(p.eventId), 'photo:updated', adminPhoto(updated));
@@ -217,7 +220,7 @@ export async function markPrinted(photoId, printed = true) {
   const p = await getPhoto(photoId);
   if (!p) return null;
   const updated = await updatePhoto(photoId, { printedAt: printed ? new Date().toISOString() : null });
-  if (printed) await queueOp(photoId, OPS.MOVE_PRINTED);
+  await queueOp(photoId, printed ? OPS.MOVE_PRINTED : OPS.MOVE_UNPRINTED);
   await media.onPrinted(updated, printed).catch((err) => log.warn(`archivar impresión: ${err.message}`));
   publish(adminChannel(p.eventId), 'photo:updated', adminPhoto(updated));
   return updated;

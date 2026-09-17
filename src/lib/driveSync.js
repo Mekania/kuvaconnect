@@ -20,9 +20,28 @@ const log = logger('drive-sync');
 export const OPS = {
   UPLOAD_ORIGINAL: 'uploadOriginal',
   UPLOAD_PRINT: 'uploadPrint',
+  MOVE_APPROVED: 'moveApproved',
   MOVE_REJECTED: 'moveRejected',
   MOVE_PRINTED: 'movePrinted',
+  MOVE_UNPRINTED: 'moveUnprinted',
   DELETE_PRINT: 'deletePrint',
+};
+
+/**
+ * Operaciones que se contradicen entre sí.
+ *
+ * La cola puede quedarse horas o días esperando (por ejemplo, si Drive todavía
+ * no está conectado), y en ese tiempo el logístico puede aprobar, rechazar y
+ * volver a aprobar la misma foto. Si al drenar la cola se ejecutan las dos
+ * órdenes, la última en correr gana y deshace la decisión real. Por eso encolar
+ * una operación cancela a su contraria en vez de acumularse junto a ella.
+ */
+const CANCELS = {
+  [OPS.MOVE_APPROVED]: [OPS.MOVE_REJECTED],
+  [OPS.MOVE_REJECTED]: [OPS.MOVE_APPROVED, OPS.UPLOAD_PRINT, OPS.MOVE_PRINTED, OPS.MOVE_UNPRINTED],
+  [OPS.UPLOAD_PRINT]: [OPS.DELETE_PRINT, OPS.MOVE_REJECTED],
+  [OPS.MOVE_PRINTED]: [OPS.MOVE_REJECTED, OPS.MOVE_UNPRINTED],
+  [OPS.MOVE_UNPRINTED]: [OPS.MOVE_PRINTED],
 };
 
 const MAX_ATTEMPTS = 6;
@@ -35,6 +54,8 @@ export async function queueOp(photoId, op) {
   const p = await getPhoto(photoId);
   if (!p) return;
   const drive = { pendingOps: [], attempts: 0, ...(p.drive || {}) };
+  const cancel = CANCELS[op] || [];
+  drive.pendingOps = drive.pendingOps.filter((o) => !cancel.includes(o));
   if (!drive.pendingOps.includes(op)) drive.pendingOps = [...drive.pendingOps, op];
   drive.state = 'pending';
   drive.attempts = 0;
@@ -93,6 +114,18 @@ async function runOp(event, photo, op, folders) {
       await drive.deleteFile(photo.drive.printId);
       photo.drive.printId = null;
       photo.drive.printLink = null;
+      break;
+    }
+
+    case OPS.MOVE_APPROVED: {
+      // Devuelve el original a 01_Originales tras revertir un rechazo.
+      if (photo.drive?.originalId) await drive.moveFile(photo.drive.originalId, folders.originals);
+      break;
+    }
+
+    case OPS.MOVE_UNPRINTED: {
+      // Se desmarcó como impresa: vuelve a la cola de impresión.
+      if (photo.drive?.printId) await drive.moveFile(photo.drive.printId, folders.toPrint);
       break;
     }
 
@@ -228,13 +261,19 @@ export async function requeueAll() {
   let n = 0;
   for (const ev of await listEvents()) {
     for (const p of await listPhotos(ev.id)) {
+      // Reconstruimos las operaciones desde el estado REAL de la foto, no
+      // desde lo que quedara en la cola: así una cola corrupta se corrige sola.
       const ops = [];
       if (!p.drive?.originalId) ops.push(OPS.UPLOAD_ORIGINAL);
-      if (p.status === 'approved' && !p.drive?.printId) ops.push(OPS.UPLOAD_PRINT);
+      if (p.status === 'approved') {
+        ops.push(OPS.MOVE_APPROVED);
+        if (!p.drive?.printId) ops.push(OPS.UPLOAD_PRINT);
+        if (p.printedAt) ops.push(OPS.MOVE_PRINTED);
+      }
       if (p.status === 'rejected') ops.push(OPS.MOVE_REJECTED);
       if (!ops.length) continue;
       const d = { pendingOps: [], attempts: 0, ...(p.drive || {}) };
-      d.pendingOps = [...new Set([...(d.pendingOps || []), ...ops])];
+      d.pendingOps = ops; // reemplaza, no acumula
       d.state = 'pending';
       d.attempts = 0;
       d.nextTryAt = null;
