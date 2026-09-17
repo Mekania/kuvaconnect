@@ -4,23 +4,31 @@
  *   npm run drive:selftest
  *
  * Crea un evento de prueba, sube una foto, la compone con el marco, la modera
- * (aprobar → rechazar → aprobar) y comprueba que los archivos terminaron en la
- * carpeta correcta. Al final borra todo lo que creó.
+ * (aprobar → rechazar → aprobar → impresa) y comprueba que los archivos
+ * terminaron en la carpeta correcta de Drive. Al final borra todo lo que creó.
  *
  * Esto es lo que valida que el modo nube funciona. Córrelo DESPUÉS de conectar
  * Drive con `npm run drive:auth` y ANTES de desplegar a Vercel.
+ *
+ * ── Por qué todo se importa con await import() ──────────────────────────────
+ * En un módulo ES, TODOS los `import` se evalúan antes que la primera línea del
+ * cuerpo. Los módulos de la app leen KUVA_STORE/KUVA_MEDIA al cargarse, así que
+ * si los importáramos arriba con `import ... from`, se inicializarían en modo
+ * disco y esta prueba mediría el modo equivocado sin avisar. (Pasó: la primera
+ * versión de este archivo daba todo en verde corriendo en local.)
  */
 process.env.KUVA_STORE = 'drive';
 process.env.KUVA_MEDIA = 'drive';
 process.env.DRIVE_ENABLED = 'true';
 
-import sharp from 'sharp';
-import * as drive from '../src/lib/drive.js';
-import * as driveBackend from '../src/lib/driveBackend.js';
-import { loadOverlayFrames } from '../src/lib/frames/index.js';
-import { createEvent } from '../src/lib/eventService.js';
-import { ingest, approve, reject, markPrinted, feed, queue } from '../src/lib/photoService.js';
-import { getPhoto, listEvents } from '../src/lib/db.js';
+const sharp = (await import('sharp')).default;
+const drive = await import('../src/lib/drive.js');
+const driveBackend = await import('../src/lib/driveBackend.js');
+const { loadOverlayFrames } = await import('../src/lib/frames/index.js');
+const { createEvent } = await import('../src/lib/eventService.js');
+const { ingest, approve, reject, markPrinted, feed, queue } = await import('../src/lib/photoService.js');
+const { getPhoto, listEvents, DRIVER: STORE_DRIVER } = await import('../src/lib/db.js');
+const { DRIVER: MEDIA_DRIVER } = await import('../src/lib/media.js');
 
 const ok = (m) => console.log(`  \x1b[32m✓\x1b[0m ${m}`);
 const bad = (m) => console.log(`  \x1b[31m✗\x1b[0m ${m}`);
@@ -32,7 +40,13 @@ if (!drive.authMode()) {
   bad('No hay credenciales de Drive. Corre primero:  npm run drive:auth');
   process.exit(1);
 }
-ok(`credenciales listas (modo ${drive.authMode()})`);
+
+// Sin esto la prueba no vale nada: confirmamos que de verdad estamos en modo nube.
+if (STORE_DRIVER !== 'drive' || MEDIA_DRIVER !== 'drive') {
+  bad(`La prueba no está en modo nube (store=${STORE_DRIVER}, media=${MEDIA_DRIVER}).`);
+  process.exit(1);
+}
+ok(`modo nube activo · store=${STORE_DRIVER} media=${MEDIA_DRIVER} auth=${drive.authMode()}`);
 
 loadOverlayFrames();
 
@@ -46,19 +60,34 @@ async function testPhoto() {
   return sharp(Buffer.from(svg)).jpeg({ quality: 88 }).toBuffer();
 }
 
+const isDriveId = (v) => typeof v === 'string' && v.length > 20 && !v.includes('\\') && !v.includes('/');
+
+/** Cuenta archivos en cada carpeta del evento, que es donde vive el estado. */
+async function census(event) {
+  const f = await driveBackend.folders(event.folderId);
+  const out = {};
+  for (const key of ['originals', 'toPrint', 'rejected', 'printed']) {
+    const files = await drive.listFiles(`'${f[key]}' in parents and trashed = false`, { fields: 'files(id)' });
+    out[key] = files.length;
+  }
+  return out;
+}
+
+const expect = (cond, msg) => { if (!cond) throw new Error(msg); };
+
 let event;
-let photo;
 
 try {
-  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '');
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T-]/g, '');
   event = await createEvent({ name: `_PRUEBA KuvaConnect ${stamp}`, moderation: 'pre', fitMode: 'crop' });
+  expect(event.folderId, 'el evento no quedó con carpeta de Drive');
   ok(`evento creado en Drive: ${event.name}`);
 
   const found = (await listEvents()).find((e) => e.id === event.id);
-  if (!found) throw new Error('el evento no se pudo leer de vuelta');
-  ok('el evento se lee de vuelta desde Drive (la carpeta es el registro)');
+  expect(found, 'el evento no se pudo leer de vuelta desde Drive');
+  ok('el evento se lee de vuelta (la carpeta ES el registro)');
 
-  photo = await ingest(event, {
+  const photo = await ingest(event, {
     buffer: await testPhoto(),
     mimeType: 'image/jpeg',
     device: 'selftest',
@@ -66,49 +95,63 @@ try {
     author: 'KuvaConnect',
   });
   ok(`foto procesada · #${photo.seq} · ${photo.orientation}/${photo.fitMode} · marco ${photo.frameId}`);
-  info(`archivos: ${Object.entries(photo.files).map(([k, v]) => `${k}=${String(v).slice(0, 8)}…`).join(' ')}`);
+
+  // Que los archivos sean ids de Drive y no rutas de disco es justo lo que
+  // se coló la primera vez que se escribió esta prueba.
+  for (const [kind, id] of Object.entries(photo.files)) {
+    expect(isDriveId(id), `el archivo ${kind} no es un id de Drive: ${id}`);
+  }
+  ok('los cinco archivos son ids de Drive, no rutas de disco');
 
   const back = await getPhoto(photo.id);
-  if (!back) throw new Error('la foto no se pudo leer de vuelta');
-  if (back.status !== 'pending') throw new Error(`estado esperado pending, llegó ${back.status}`);
-  if (back.caption !== 'Prueba automática') throw new Error('el mensaje no sobrevivió el viaje');
-  ok('la foto se lee de vuelta con su estado y su mensaje');
+  expect(back, 'la foto no se pudo leer de vuelta');
+  expect(back.status === 'pending', `estado esperado pending, llegó ${back.status}`);
+  expect(back.caption === 'Prueba automática', 'el mensaje no sobrevivió el viaje');
+  expect(back.author === 'KuvaConnect', 'el nombre no sobrevivió el viaje');
+  expect(back.seq === photo.seq, 'el consecutivo no coincide');
+  ok('se lee de vuelta con estado, consecutivo, nombre y mensaje');
 
-  const pending = await queue(event.id, { status: 'pending' });
-  if (!pending.length) throw new Error('la foto no aparece en la cola de moderación');
+  expect((await queue(event.id, { status: 'pending' })).length === 1, 'no aparece en la cola de moderación');
   ok('aparece en la cola de moderación');
 
   await approve(photo.id);
-  const approved = await getPhoto(photo.id);
-  if (approved.status !== 'approved') throw new Error('no quedó aprobada');
-  ok('aprobada · la impresión se movió a 02_Para_imprimir');
-
-  const shown = await feed(event.id);
-  if (!shown.find((p) => p.id === photo.id)) throw new Error('no salió en el feed de la pantalla');
-  ok('sale en el feed de la pantalla');
+  expect((await getPhoto(photo.id)).status === 'approved', 'no quedó aprobada');
+  let c = await census(event);
+  expect(c.originals === 1 && c.toPrint === 1 && c.rejected === 0,
+    `tras aprobar: ${JSON.stringify(c)}`);
+  expect((await feed(event.id)).some((p) => p.id === photo.id), 'no salió en el feed de la pantalla');
+  ok('aprobada · original en 01, impresión en 02, y sale en pantalla');
 
   await reject(photo.id, 'prueba');
-  const rejected = await getPhoto(photo.id);
-  if (rejected.status !== 'rejected') throw new Error('no quedó rechazada');
-  if ((await feed(event.id)).find((p) => p.id === photo.id)) throw new Error('sigue en el feed tras rechazarla');
-  ok('rechazada · el original se movió a 03_Rechazadas y salió de la pantalla');
+  expect((await getPhoto(photo.id)).status === 'rejected', 'no quedó rechazada');
+  c = await census(event);
+  expect(c.originals === 0 && c.rejected === 1 && c.toPrint === 0,
+    `tras rechazar: ${JSON.stringify(c)}`);
+  expect(!(await feed(event.id)).some((p) => p.id === photo.id), 'sigue en el feed tras rechazarla');
+  ok('rechazada · original a 03, fuera de la cola de impresión y de la pantalla');
 
   await approve(photo.id);
-  if ((await getPhoto(photo.id)).status !== 'approved') throw new Error('no se pudo volver a aprobar');
-  ok('re-aprobada · vuelve a 01_Originales');
+  expect((await getPhoto(photo.id)).status === 'approved', 'no se pudo volver a aprobar');
+  c = await census(event);
+  expect(c.originals === 1 && c.toPrint === 1 && c.rejected === 0,
+    `tras re-aprobar: ${JSON.stringify(c)}`);
+  ok('re-aprobada · todo vuelve a su sitio');
 
   await markPrinted(photo.id, true);
-  if (!(await getPhoto(photo.id)).printedAt) throw new Error('no quedó marcada como impresa');
-  ok('marcada como impresa · el archivo se movió a 04_Impresas');
+  expect((await getPhoto(photo.id)).printedAt, 'no quedó marcada como impresa');
+  c = await census(event);
+  expect(c.printed === 1 && c.toPrint === 0, `tras marcar impresa: ${JSON.stringify(c)}`);
+  ok('marcada como impresa · el archivo pasó a 04_Impresas');
 
   const img = await driveBackend.readFileById((await getPhoto(photo.id)).files.web);
   const meta = await sharp(img).metadata();
+  expect(meta.width > 0, 'la imagen descargada de Drive no es válida');
   ok(`la imagen se descarga de Drive y es válida (${meta.width}x${meta.height})`);
 
   console.log('\n  \x1b[32mTODO BIEN.\x1b[0m El modo nube funciona contra tu Drive.\n');
 } catch (err) {
   bad(err.message);
-  console.error(`\n  Detalle: ${err.stack}\n`);
+  if (process.env.DEBUG) console.error(err.stack);
   process.exitCode = 1;
 } finally {
   // Dejar el Drive del cliente como estaba.

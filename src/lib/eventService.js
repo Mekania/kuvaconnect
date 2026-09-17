@@ -75,10 +75,12 @@ export async function createEvent(input = {}) {
     drive: {},
   };
 
-  await addEvent(ev);
+  // Devolvemos lo que responde el almacén, no el objeto que armamos: en modo
+  // Drive viene con el folderId, que es lo que luego localiza todo el evento.
+  const saved = await addEvent(ev);
   await ensureEventDirs(ev.id);
-  log.ok(`evento creado: ${ev.name} (${ev.slug})`);
-  return ev;
+  log.ok(`evento creado: ${saved.name} (${saved.slug})`);
+  return saved;
 }
 
 /** Al arrancar siempre debe existir al menos un evento, para que la pantalla no quede en blanco. */
