@@ -20,6 +20,21 @@ esquema `kuva` y dos buckets `kuva-*` vacíos, creados por error y pendientes de
 en cuanto el modo Drive esté probado:
 `drop schema kuva cascade;` + borrar los buckets `kuva-public` y `kuva-private`.
 
+## EN PRODUCCIÓN (17-sep-2026)
+- Repo: https://github.com/Mekania/kuvaconnect (público, auto-despliega en cada push)
+- App:  https://kuvaconnect.vercel.app
+  - Pantalla `/d/expresate-24-7` · Celular `/u/expresate-24-7?t=...` · Panel `/admin`
+  - PIN de producción distinto al local (está en las variables de entorno de Vercel).
+- Drive conectado como info@mekaniads.com, alcance `drive.file`.
+- Supabase descartado; el esquema `kuva` de ops-hub ya se eliminó. Quedan dos
+  buckets `kuva-public` / `kuva-private` VACÍOS que hay que borrar a mano desde
+  el dashboard (Supabase no deja borrarlos por SQL).
+
+**OJO — los dos modos NO comparten fotos.** La configuración del evento sí viaja
+por Drive (va en la descripción de la carpeta), pero el registro de las fotos
+vive en la base JSON local en modo evento y en las propiedades de los archivos
+de Drive en modo nube. Hay que elegir UN modo por evento, no mezclarlos.
+
 ## Correr
 `npm install && npm start` → consola muestra enlaces. PIN panel `2468` (cambiar en `.env`).
 - Pantalla `/d/expresate-24-7` · Celular `/u/<slug>?t=token` · Panel `/admin`
