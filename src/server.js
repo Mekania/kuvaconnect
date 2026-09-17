@@ -44,7 +44,12 @@ app.get('/media/:event/:kind/:file', async (req, res) => {
 
   const isPublicKind = kind === 'thumb' || kind === 'web';
   res.set('Cache-Control', isPublicKind ? 'public, max-age=31536000, immutable' : 'private, no-store');
-  if (kind === 'print') res.set('Content-Disposition', `attachment; filename="kuva_${file}"`);
+  // Solo forzamos la descarga cuando se pide explicitamente: el boton de
+  // imprimir del panel carga este mismo archivo dentro de un <img>, y con
+  // Content-Disposition: attachment el navegador no lo renderiza.
+  if (kind === 'print' && req.query.download) {
+    res.set('Content-Disposition', `attachment; filename="kuva_${file}"`);
+  }
 
   const dot = file.lastIndexOf('.');
   const photoId = dot > 0 ? file.slice(0, dot) : file;

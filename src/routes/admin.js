@@ -6,7 +6,7 @@ import { getEvent, getPhoto, listEvents, listPhotos, updateEvent, countByStatus 
 import { createEvent, publicEvent, setActive, activeEvent, frameMeta } from '../lib/eventService.js';
 import { listFrames, getFrame } from '../lib/frames/index.js';
 import { composeFramed } from '../lib/compose.js';
-import { approve, reject, markPrinted, recompose, queue, adminPhoto, adminChannel } from '../lib/photoService.js';
+import { approve, reject, markPrinted, recompose, destroy, queue, adminPhoto, adminChannel } from '../lib/photoService.js';
 import { subscribe } from '../lib/bus.js';
 import * as driveSync from '../lib/driveSync.js';
 import * as drive from '../lib/drive.js';
@@ -137,6 +137,12 @@ admin.post('/photos/:id/printed', async (req, res) => {
   const p = await markPrinted(req.params.id, req.body?.printed !== false);
   if (!p) return res.status(404).json({ error: 'Foto no encontrada' });
   res.json({ photo: adminPhoto(p) });
+});
+
+admin.delete('/photos/:id', async (req, res) => {
+  const p = await destroy(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Foto no encontrada' });
+  res.json({ ok: true, id: p.id });
 });
 
 admin.post('/photos/:id/recompose', async (req, res) => {

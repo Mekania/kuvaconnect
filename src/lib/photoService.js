@@ -1,5 +1,5 @@
 import sharp from 'sharp';
-import { addPhoto, getEvent, getPhoto, listPhotos, updatePhoto, nextSeq } from './db.js';
+import { addPhoto, getEvent, getPhoto, listPhotos, updatePhoto, nextSeq, deletePhoto as deletePhotoRecord } from './db.js';
 import { composeFramed, makeWebVersions, makeRawPreview, analyze } from './compose.js';
 import * as media from './media.js';
 import { frameMeta } from './eventService.js';
@@ -224,6 +224,26 @@ export async function markPrinted(photoId, printed = true) {
   await media.onPrinted(updated, printed).catch((err) => log.warn(`archivar impresión: ${err.message}`));
   publish(adminChannel(p.eventId), 'photo:updated', adminPhoto(updated));
   return updated;
+}
+
+/**
+ * Borra una foto del evento: archivos y registro.
+ * Es la salida para cuando algo se aprobó por error y ya no debe estar en
+ * ninguna parte. En Drive los archivos van a la papelera, no se destruyen.
+ */
+export async function destroy(photoId) {
+  const p = await getPhoto(photoId);
+  if (!p) return null;
+  try {
+    await media.destroy(p);
+  } catch (err) {
+    log.warn(`borrando archivos de ${photoId}: ${err.message}`);
+  }
+  await deletePhotoRecord(photoId);
+  publish(p.eventId, 'photo:removed', { id: p.id });
+  publish(adminChannel(p.eventId), 'photo:deleted', { id: p.id });
+  log.info(`borrada #${p.seq} (${photoId})`);
+  return p;
 }
 
 /** Recompone la impresión: útil si se cambia el marco a mitad de evento. */

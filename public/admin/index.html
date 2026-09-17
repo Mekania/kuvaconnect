@@ -103,6 +103,7 @@
   .shot .cap em { font-style: normal; color: var(--brand); font-weight: 900; }
   .shot .ops { display: flex; gap: 7px; padding: 0 11px 12px; }
   .shot .ops .btn { flex: 1; padding: .6em .4em; font-size: .82rem; border-radius: var(--r-sm); }
+  .shot .ops .btn-icon { flex: 0 0 auto; padding: .6em .75em; }
 
   .empty-state {
     grid-column: 1 / -1;
@@ -135,7 +136,7 @@
   .panel .row { display: grid; gap: 14px; grid-template-columns: 1fr 1fr; }
   @media (max-width: 520px) { .panel .row { grid-template-columns: 1fr; } }
 
-  .frames { display: grid; gap: 13px; grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); }
+  .frames { display: grid; gap: 13px; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); }
   .frame-opt {
     border-radius: var(--r-sm); overflow: hidden;
     background: var(--paper); cursor: pointer; text-align: left; padding: 0;
@@ -144,7 +145,13 @@
   }
   .frame-opt:hover { transform: translateY(-2px); }
   .frame-opt.on { box-shadow: inset 0 0 0 4px var(--brand); }
-  .frame-opt img { width: 100%; display: block; aspect-ratio: 2/3; object-fit: contain; background: #F3E3EA; }
+  .frame-opt .pair {
+    display: grid; grid-template-columns: 3fr 4fr; gap: 6px;
+    padding: 8px; background: #F3E3EA; align-items: center;
+  }
+  .frame-opt .pair img { width: 100%; display: block; object-fit: contain; border-radius: 3px; }
+  .frame-opt .pv-portrait { aspect-ratio: 2/3; }
+  .frame-opt .pv-landscape { aspect-ratio: 3/2; }
   .frame-opt .nm { padding: 9px 11px 3px; font-size: .84rem; font-weight: 900; }
   .frame-opt .ds { padding: 0 11px 11px; font-size: .71rem; color: var(--ink-faint); line-height: 1.4; font-weight: 600; }
 
@@ -209,7 +216,13 @@
       <!-- COLA DE IMPRESIÓN -->
       <section class="view" id="vPrint">
         <div class="toolbar">
-          <span class="hint">Fotos aprobadas con marco, listas para la DNP. Descarga el archivo o ábrelo desde Drive, imprímelo y márcalo como impreso.</span>
+          <select class="input" id="printFilter" style="width:auto">
+            <option value="todo">Todas las aprobadas</option>
+            <option value="pendientes">Solo por imprimir</option>
+            <option value="impresas">Solo ya impresas</option>
+          </select>
+          <span class="pill pill-gold" id="printCount"></span>
+          <span class="hint">Imprime directo desde aquí. La primera vez elige la DNP en el diálogo y queda predeterminada.</span>
         </div>
         <div class="grid" id="gPrint"></div>
       </section>
@@ -331,9 +344,11 @@
     </div>
     <div class="lb-foot">
       <button class="btn btn-green" id="lbApprove">Aprobar</button>
+      <button class="btn btn-brand" id="lbPrint">🖨 Imprimir</button>
       <button class="btn btn-red" id="lbReject">Rechazar</button>
-      <a class="btn btn-gold" id="lbDownload" download>Descargar para imprimir</a>
+      <a class="btn btn-gold" id="lbDownload" download>Descargar</a>
       <a class="btn btn-ghost" id="lbDrive" target="_blank" rel="noopener">Ver en Drive ↗</a>
+      <button class="btn btn-ghost" id="lbDelete">🗑 Borrar</button>
     </div>
   </div>
 

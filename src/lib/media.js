@@ -150,6 +150,22 @@ export async function onPrinted(photo, printed) {
   await driveBackend.movePrint(photo, printed ? 'printed' : 'queue');
 }
 
+/** Borra TODOS los archivos de una foto (original, impresión y derivados). */
+export async function destroy(photo) {
+  if (DRIVER === 'disk') {
+    const ext = photo.originalExt || 'jpg';
+    await Promise.all([
+      fs.rm(filePath(photo.eventId, 'orig', photo.id, ext), { force: true }),
+      fs.rm(filePath(photo.eventId, 'raw', photo.id), { force: true }),
+      fs.rm(filePath(photo.eventId, 'print', photo.id), { force: true }),
+      fs.rm(filePath(photo.eventId, 'web', photo.id), { force: true }),
+      fs.rm(filePath(photo.eventId, 'thumb', photo.id), { force: true }),
+    ]);
+    return;
+  }
+  await driveBackend.deletePhoto(photo);
+}
+
 export const IS_DRIVE = DRIVER === 'drive';
 
 export function extFromMime(mime) {

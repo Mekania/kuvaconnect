@@ -143,6 +143,20 @@ export async function updatePhoto(id, patch) {
 }
 
 /**
+ * Elimina el registro de una foto.
+ * En modo Drive no hay nada que hacer aquí: el registro ES el archivo, y ese lo
+ * manda a la papelera la capa de archivos.
+ */
+export async function deletePhoto(id) {
+  if (!json) return true;
+  const i = json.photos.data.photos.findIndex((p) => p.id === id);
+  if (i < 0) return false;
+  json.photos.data.photos.splice(i, 1);
+  json.photos.save();
+  return true;
+}
+
+/**
  * Fotos con trabajo pendiente en la cola de Drive.
  * En modo nube la cola no existe: la foto ya nació en Drive.
  */

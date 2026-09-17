@@ -7,7 +7,16 @@ import { $, $$, el, api, stream, toast, timeAgo, clock, bytes } from '/shared/ku
  * al lado de la impresora, con poca luz.
  */
 
+/**
+ * El panel es para moderar, no para configurar.
+ * Los ajustes del evento y el estado de Drive quedan detrás de ?avanzado=1
+ * para que quien modera no pueda cambiar el marco ni cerrar las subidas por
+ * accidente en pleno evento.
+ */
+const ADVANCED = new URLSearchParams(location.search).has('avanzado');
+
 const state = {
+  printFilter: 'todo',   // qué se ve en la cola de impresión
   eventId: null,
   event: null,
   frames: [],
@@ -40,6 +49,12 @@ $('#logout').addEventListener('click', async () => {
 });
 
 /* ──────────────────────────── navegación de vistas ──────────────────────── */
+
+if (!ADVANCED) {
+  $$('nav.tabs button').forEach((b) => {
+    if (b.dataset.view === 'settings' || b.dataset.view === 'system') b.remove();
+  });
+}
 
 $$('nav.tabs button').forEach((b) => b.addEventListener('click', () => switchView(b.dataset.view)));
 
@@ -116,15 +131,88 @@ function card(p, { mode }) {
     );
   } else if (mode === 'print') {
     ops.append(
-      el('a', { class: 'btn btn-gold', href: p.urls.print, download: `kuva_${String(p.seq).padStart(4, '0')}.jpg` }, 'Descargar'),
-      el('button', { class: 'btn', onclick: () => act(p.id, 'printed') }, p.printedAt ? 'Desmarcar' : 'Impresa'),
+      el('button', { class: 'btn btn-brand', onclick: () => printPhoto(p) }, '🖨 Imprimir'),
+      el('button', { class: 'btn', onclick: () => act(p.id, 'printed') }, p.printedAt ? 'Sin imprimir' : 'Impresa'),
+      el('a', {
+        class: 'btn btn-icon',
+        href: `${p.urls.print}?download=1`,
+        download: `kuva_${String(p.seq).padStart(4, '0')}.jpg`,
+        title: 'Descargar el archivo',
+      }, '⤓'),
     );
   } else {
     if (p.status !== 'approved') ops.append(el('button', { class: 'btn btn-sm btn-green', onclick: () => act(p.id, 'approve') }, 'Aprobar'));
     if (p.status !== 'rejected') ops.append(el('button', { class: 'btn btn-sm btn-red', onclick: () => act(p.id, 'reject') }, 'Rechazar'));
+    ops.append(el('button', { class: 'btn btn-sm btn-icon', onclick: () => removePhoto(p), title: 'Borrar definitivamente' }, '🗑'));
   }
   if (ops.children.length) node.append(ops);
   return node;
+}
+
+/* ──────────────────────────── impresión directa ─────────────────────────── */
+
+let printFrame = null;
+
+/**
+ * Manda la foto a la impresora desde el panel.
+ *
+ * El archivo ya es exactamente 10x15 cm a 300 dpi, así que aquí solo se declara
+ * el tamaño de página y se estira la imagen a la hoja completa: sin márgenes,
+ * sin reescalados del navegador, sin "ajustar a página" que recorte el marco.
+ * El navegador no puede imprimir en silencio, así que abre el diálogo — ahí se
+ * elige la DNP la primera vez y queda como predeterminada.
+ */
+function printPhoto(p) {
+  const landscape = p.orientation === 'landscape';
+  const w = landscape ? '15cm' : '10cm';
+  const h = landscape ? '10cm' : '15cm';
+
+  if (!printFrame) {
+    printFrame = el('iframe', { 'aria-hidden': 'true', style: 'position:fixed;left:-9999px;width:0;height:0;border:0' });
+    document.body.append(printFrame);
+  }
+
+  const doc = printFrame.contentWindow.document;
+  doc.open();
+  doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>Kuva ${p.seq}</title>
+    <style>
+      @page { size: ${w} ${h}; margin: 0; }
+      html, body { margin: 0; padding: 0; background: #fff; }
+      img { display: block; width: ${w}; height: ${h}; object-fit: fill; }
+    </style></head><body><img src="${p.urls.print}"></body></html>`);
+  doc.close();
+
+  const img = doc.querySelector('img');
+  const go = () => {
+    const win = printFrame.contentWindow;
+    win.focus();
+    win.onafterprint = () => {
+      // No hay forma de saber si salió bien o si cancelaron: se pregunta.
+      if (!p.printedAt && confirm(`¿Marcar la foto #${String(p.seq).padStart(3, '0')} como impresa?`)) {
+        act(p.id, 'printed');
+      }
+    };
+    win.print();
+  };
+  if (img.complete) go();
+  else {
+    img.onload = go;
+    img.onerror = () => toast('No se pudo cargar el archivo de impresión.', 'error');
+  }
+}
+
+async function removePhoto(p) {
+  const n = `#${String(p.seq).padStart(3, '0')}`;
+  if (!confirm(`¿Borrar la foto ${n}?\n\nSale de la pantalla y del panel. Los archivos van a la papelera de Drive, así que se pueden recuperar allí.`)) return;
+  try {
+    await api(`/api/admin/photos/${p.id}`, { method: 'DELETE' });
+    state.photos.delete(p.id);
+    if (state.lightbox === p.id) closeLightbox();
+    render();
+    toast(`Foto ${n} borrada`, 'ok');
+  } catch (err) {
+    toast(err.message, 'error');
+  }
 }
 
 function emptyState(icon, big, small) {
@@ -137,7 +225,8 @@ function emptyState(icon, big, small) {
 
 function render() {
   const pending = photosByStatus('pending');
-  const printQueue = photosByStatus('approved').filter((p) => !p.printedAt);
+  const approved = photosByStatus('approved');
+  const printQueue = approved.filter((p) => !p.printedAt);
 
   $('#bPending').textContent = pending.length;
   $('#bPending').dataset.n = pending.length;
@@ -155,9 +244,14 @@ function render() {
   }
 
   if (state.view === 'print') {
-    $('#gPrint').replaceChildren(...(printQueue.length
-      ? printQueue.map((p) => card(p, { mode: 'print' }))
-      : [emptyState('🖨️', 'Sin cola', 'Cuando apruebes fotos aparecerán aquí listas para imprimir.')]));
+    // Marcar una foto como impresa ya no la hace desaparecer: cambia de filtro.
+    const rows = state.printFilter === 'impresas'
+      ? approved.filter((p) => p.printedAt)
+      : (state.printFilter === 'pendientes' ? printQueue : approved);
+    $('#gPrint').replaceChildren(...(rows.length
+      ? rows.map((p) => card(p, { mode: 'print' }))
+      : [emptyState('🖨️', 'Nada por aquí', 'Cuando apruebes fotos aparecerán listas para imprimir.')]));
+    $('#printCount').textContent = `${printQueue.length} por imprimir · ${approved.length - printQueue.length} impresas`;
   }
 
   if (state.view === 'all') {
@@ -211,6 +305,7 @@ $('#approveAll').addEventListener('click', async () => {
   } catch (err) { toast(err.message, 'error'); }
 });
 
+$('#printFilter')?.addEventListener('change', (e) => { state.printFilter = e.target.value; render(); });
 $('#filterStatus').addEventListener('change', render);
 $('#refreshAll').addEventListener('click', () => loadPhotos());
 
@@ -231,13 +326,15 @@ function openLightbox(id) {
   ].filter(Boolean).join('  ·  ');
   $('#lbRaw').src = p.urls.raw || p.urls.web;
   $('#lbPrint').src = p.urls.web;
-  $('#lbDownload').href = p.urls.print;
+  $('#lbDownload').href = `${p.urls.print}?download=1`;
   $('#lbDownload').download = `kuva_${String(p.seq).padStart(4, '0')}.jpg`;
   const drive = $('#lbDrive');
   drive.href = p.drive?.printLink || p.drive?.originalLink || '#';
   drive.style.display = (p.drive?.printLink || p.drive?.originalLink) ? '' : 'none';
   $('#lbApprove').style.display = p.status === 'approved' ? 'none' : '';
   $('#lbReject').style.display = p.status === 'rejected' ? 'none' : '';
+  $('#lbPrint').style.display = p.status === 'approved' ? '' : 'none';
+  $('#lbDownload').style.display = p.status === 'approved' ? '' : 'none';
   $('#lb').classList.add('on');
 }
 
@@ -250,6 +347,14 @@ $('#lbClose').addEventListener('click', closeLightbox);
 $('#lb').addEventListener('click', (e) => { if (e.target.id === 'lb') closeLightbox(); });
 $('#lbApprove').addEventListener('click', () => state.lightbox && act(state.lightbox, 'approve'));
 $('#lbReject').addEventListener('click', () => state.lightbox && act(state.lightbox, 'reject'));
+$('#lbPrint').addEventListener('click', () => {
+  const p = state.photos.get(state.lightbox);
+  if (p) printPhoto(p);
+});
+$('#lbDelete').addEventListener('click', () => {
+  const p = state.photos.get(state.lightbox);
+  if (p) removePhoto(p);
+});
 
 /* ──────────────────────── moderación con el teclado ─────────────────────── */
 
@@ -332,11 +437,20 @@ $('#saveOps').addEventListener('click', () => patchEvent({
 }, 'Configuración guardada'));
 
 function renderFrames(activeId) {
+  const v = Date.now();
+  // Cada marco tiene SIEMPRE dos versiones, vertical y horizontal: la app elige
+  // según venga la foto. Se muestran las dos para que no parezca que falta una.
+  const shot = (f, orientation) => el('img', {
+    class: `pv pv-${orientation}`,
+    src: `/api/admin/frames/${f.id}/preview.jpg?orientation=${orientation}&event=${state.eventId}&v=${v}`,
+    alt: `${f.name} ${orientation === 'landscape' ? 'horizontal' : 'vertical'}`,
+    loading: 'lazy',
+  });
   $('#frames').replaceChildren(...state.frames.map((f) => el('button', {
     class: `frame-opt ${f.id === activeId ? 'on' : ''}`,
     onclick: () => patchEvent({ frameId: f.id }, `Marco cambiado a ${f.name}`),
   },
-    el('img', { src: `/api/admin/frames/${f.id}/preview.jpg?event=${state.eventId}&v=${Date.now()}`, alt: f.name, loading: 'lazy' }),
+    el('div', { class: 'pair' }, shot(f, 'portrait'), shot(f, 'landscape')),
     el('div', { class: 'nm' }, f.name),
     el('div', { class: 'ds' }, f.description),
   )));
@@ -470,6 +584,10 @@ function connect() {
     'photo:updated': (photo) => {
       const prev = state.photos.get(photo.id);
       state.photos.set(photo.id, { ...prev, ...photo });
+      render();
+    },
+    'photo:deleted': ({ id }) => {
+      state.photos.delete(id);
       render();
     },
   });

@@ -330,6 +330,17 @@ export async function removePublicFiles(photo) {
   await Promise.all(ids.map((id) => drive.deleteFile(id).catch(() => {})));
 }
 
+/**
+ * Borra una foto por completo.
+ * Va a la PAPELERA de Drive, no se destruye: si el moderador se equivoca, el
+ * cliente puede recuperarla desde Drive durante 30 días.
+ */
+export async function deletePhoto(photo) {
+  const ids = [photo.files?.orig, photo.files?.web, photo.files?.thumb, photo.files?.raw, photo.files?.print]
+    .filter(Boolean);
+  await Promise.all(ids.map((id) => drive.deleteFile(id).catch((err) => log.warn(`borrar ${id}: ${err.message}`))));
+}
+
 export function resetCache() {
   folderCache.clear();
 }
