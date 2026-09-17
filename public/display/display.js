@@ -133,9 +133,12 @@ function layoutAlbum() {
     }
   }
 
-  document.documentElement.style.setProperty('--cols', best.cols);
+  // Nunca más columnas que fotos: con una sola foto y cuatro columnas, la foto
+  // se queda en la celda de la izquierda y la pantalla se ve rota.
+  const cols = Math.min(best.cols, Math.max(1, n));
+  document.documentElement.style.setProperty('--cols', cols);
 
-  const capacity = best.cols * best.rows;
+  const capacity = cols * best.rows;
   for (let i = capacity; i < tiles.length; i++) {
     seen.delete(tiles[i].dataset.id);
     tiles[i].remove();
