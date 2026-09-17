@@ -30,6 +30,8 @@ let timer = null;
 let running = false;
 
 export async function queueOp(photoId, op) {
+  // En modo nube la foto ya nació en Drive: no hay nada que encolar.
+  if (process.env.VERCEL || (process.env.KUVA_MEDIA || '').toLowerCase() === 'drive') return;
   const p = await getPhoto(photoId);
   if (!p) return;
   const drive = { pendingOps: [], attempts: 0, ...(p.drive || {}) };
@@ -206,6 +208,10 @@ export function stop() {
 export function syncNow() { return tick(); }
 
 export async function queueStats() {
+  if (process.env.VERCEL || (process.env.KUVA_MEDIA || '').toLowerCase() === 'drive') {
+    // Las fotos se escriben directo en Drive: no hay cola que reportar.
+    return { pending: 0, errored: 0, synced: 0, configured: drive.isConfigured(), mode: drive.authMode(), direct: true };
+  }
   let pending = 0; let errored = 0; let synced = 0;
   for (const ev of await listEvents()) {
     for (const p of await listPhotos(ev.id)) {

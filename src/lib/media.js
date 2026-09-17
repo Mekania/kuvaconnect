@@ -2,53 +2,32 @@ import fs from 'node:fs/promises';
 import fssync from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { logger } from './logger.js';
-
-const log = logger('media');
+import * as driveBackend from './driveBackend.js';
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────
  *  ARCHIVOS — dos drivers detrás de la misma API
  * ─────────────────────────────────────────────────────────────────────────────
  *
- *  disk      → data/media/. Modo evento: el disco del portátil es la fuente de
- *              verdad y no depende de nadie.
+ *  disk   → data/media/. Modo evento: el disco del portátil es la fuente de
+ *           verdad y no depende de nadie.
  *
- *  supabase  → Storage. Modo nube, donde no hay disco que sobreviva.
- *              Dos buckets con criterios distintos:
- *                kuva-public  → web/ y thumb/  (ya moderadas; se sirven por CDN)
- *                kuva-private → orig/, raw/, print/ (solo el panel, por URL firmada)
+ *  drive  → Google Drive. Modo nube. El original y la impresión van a las
+ *           carpetas que ve el logístico; los derivados de pantalla viven en
+ *           _sistema. Todo se sirve a través de /media, nunca por enlace
+ *           público de Drive, para que la regla de acceso siga siendo nuestra.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-export const DRIVER = (process.env.KUVA_MEDIA || (process.env.VERCEL ? 'supabase' : 'disk')).toLowerCase();
+export const DRIVER = (process.env.KUVA_MEDIA || (process.env.VERCEL ? 'drive' : 'disk')).toLowerCase();
 
 export const KINDS = {
-  orig: { dir: 'orig', public: false },   // el archivo tal cual lo subió el invitado
-  raw: { dir: 'raw', public: false },     // original reducido, para moderar
-  print: { dir: 'print', public: false }, // con marco, 300dpi, listo para la DNP
-  web: { dir: 'web', public: true },      // con marco, para la pantalla
-  thumb: { dir: 'thumb', public: true },  // con marco, miniatura
+  orig: { dir: 'orig' },   // el archivo tal cual lo subió el invitado
+  raw: { dir: 'raw' },     // original reducido, para moderar
+  print: { dir: 'print' }, // con marco, 300dpi, listo para la DNP
+  web: { dir: 'web' },     // con marco, para la pantalla
+  thumb: { dir: 'thumb' }, // con marco, miniatura
 };
-
-const PUBLIC_BUCKET = process.env.SUPABASE_PUBLIC_BUCKET || 'kuva-public';
-const PRIVATE_BUCKET = process.env.SUPABASE_PRIVATE_BUCKET || 'kuva-private';
-
-const bucketFor = (kind) => (KINDS[kind].public ? PUBLIC_BUCKET : PRIVATE_BUCKET);
-const objectKey = (eventId, kind, photoId, ext = 'jpg') => `${eventId}/${KINDS[kind].dir}/${photoId}.${ext}`;
-
-/* ════════════════════════════════ supabase ═══════════════════════════════ */
-
-let sb = null;
-async function storage() {
-  if (sb) return sb;
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error('Faltan SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY.');
-  const { createClient } = await import('@supabase/supabase-js');
-  sb = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-  return sb;
-}
 
 /* ══════════════════════════════════ rutas ════════════════════════════════ */
 
@@ -61,7 +40,7 @@ export function filePath(eventId, kind, photoId, ext = 'jpg') {
 }
 
 export async function ensureEventDirs(eventId) {
-  if (DRIVER !== 'disk') return; // en Storage las "carpetas" son solo prefijos
+  if (DRIVER !== 'disk') return; // en Drive las carpetas las crea driveBackend
   await Promise.all(
     Object.values(KINDS).map((k) => fs.mkdir(path.join(eventDir(eventId), k.dir), { recursive: true })),
   );
@@ -69,43 +48,43 @@ export async function ensureEventDirs(eventId) {
 
 /* ═════════════════════════════════ escribir ══════════════════════════════ */
 
-export async function write(eventId, kind, photoId, buffer, ext = 'jpg') {
+/**
+ * Devuelve el identificador del archivo escrito: una ruta en disco, o el id de
+ * Drive. Quien llama guarda ese id en el registro de la foto, porque en modo
+ * nube es la única forma de volver a encontrarlo.
+ */
+export async function write(eventId, kind, photoId, buffer, ext = 'jpg', meta = {}) {
   if (DRIVER === 'disk') {
     const p = filePath(eventId, kind, photoId, ext);
     await fs.mkdir(path.dirname(p), { recursive: true });
     await fs.writeFile(p, buffer);
     return p;
   }
-  const client = await storage();
-  const key = objectKey(eventId, kind, photoId, ext);
-  const { error } = await client.storage.from(bucketFor(kind)).upload(key, buffer, {
-    contentType: ext === 'png' ? 'image/png' : 'image/jpeg',
-    upsert: true,
-  });
-  if (error) throw new Error(`subir ${kind}/${photoId}: ${error.message}`);
-  return key;
+  return driveBackend.writeFile(eventId, kind, photoId, buffer, { ext, ...meta });
 }
 
 /* ═══════════════════════════════════ leer ════════════════════════════════ */
 
-export async function read(eventId, kind, photoId, ext = 'jpg') {
+export async function read(eventId, kind, photoId, ext = 'jpg', fileId = null) {
   if (DRIVER === 'disk') return fs.readFile(filePath(eventId, kind, photoId, ext));
-  const client = await storage();
-  const { data, error } = await client.storage.from(bucketFor(kind)).download(objectKey(eventId, kind, photoId, ext));
-  if (error) throw new Error(`leer ${kind}/${photoId}: ${error.message}`);
-  return Buffer.from(await data.arrayBuffer());
+  if (!fileId) throw new Error('en modo Drive hay que pasar el id del archivo');
+  return driveBackend.readFileById(fileId);
+}
+
+/** Lee usando el registro de la foto, que ya sabe dónde está cada archivo. */
+export async function readFor(photo, kind) {
+  if (DRIVER === 'disk') {
+    const ext = kind === 'orig' ? (photo.originalExt || 'jpg') : 'jpg';
+    return fs.readFile(filePath(photo.eventId, kind, photo.id, ext));
+  }
+  const fileId = photo.files?.[kind];
+  if (!fileId) throw new Error(`la foto ${photo.id} no tiene archivo ${kind}`);
+  return driveBackend.readFileById(fileId);
 }
 
 export async function has(eventId, kind, photoId, ext = 'jpg') {
   if (DRIVER === 'disk') return fssync.existsSync(filePath(eventId, kind, photoId, ext));
-  try {
-    const client = await storage();
-    const { data } = await client.storage.from(bucketFor(kind))
-      .list(`${eventId}/${KINDS[kind].dir}`, { search: `${photoId}.${ext}`, limit: 1 });
-    return Boolean(data?.length);
-  } catch {
-    return false;
-  }
+  return true; // en Drive lo sabe el registro de la foto (photo.files)
 }
 
 export function exists(p) {
@@ -116,64 +95,62 @@ export function exists(p) {
 
 /**
  * Borra solo lo que se sirve sin autenticación.
- * Se usa al rechazar una foto: deja de ser accesible por URL, pero el original
- * y la copia de impresión se conservan para el panel.
+ * Al rechazar una foto no basta con bajarla de la pantalla: su URL seguiría
+ * sirviendo el archivo a quien ya la tuviera.
  */
-export async function removePublic(eventId, photoId) {
+export async function removePublic(eventIdOrPhoto, photoId) {
   if (DRIVER === 'disk') {
+    const eventId = typeof eventIdOrPhoto === 'string' ? eventIdOrPhoto : eventIdOrPhoto.eventId;
+    const id = photoId || eventIdOrPhoto.id;
     await Promise.all([
-      fs.rm(filePath(eventId, 'web', photoId), { force: true }),
-      fs.rm(filePath(eventId, 'thumb', photoId), { force: true }),
+      fs.rm(filePath(eventId, 'web', id), { force: true }),
+      fs.rm(filePath(eventId, 'thumb', id), { force: true }),
     ]);
     return;
   }
-  const client = await storage();
-  const { error } = await client.storage.from(PUBLIC_BUCKET).remove([
-    objectKey(eventId, 'web', photoId),
-    objectKey(eventId, 'thumb', photoId),
-  ]);
-  if (error) log.warn(`limpiando públicos de ${photoId}: ${error.message}`);
-}
-
-export async function remove(eventId, photo) {
-  const ext = photo.originalExt || 'jpg';
-  if (DRIVER === 'disk') {
-    await Promise.all([
-      fs.rm(filePath(eventId, 'orig', photo.id, ext), { force: true }),
-      fs.rm(filePath(eventId, 'raw', photo.id), { force: true }),
-      fs.rm(filePath(eventId, 'print', photo.id), { force: true }),
-      fs.rm(filePath(eventId, 'web', photo.id), { force: true }),
-      fs.rm(filePath(eventId, 'thumb', photo.id), { force: true }),
-    ]);
-    return;
-  }
-  const client = await storage();
-  await client.storage.from(PUBLIC_BUCKET).remove([
-    objectKey(eventId, 'web', photo.id), objectKey(eventId, 'thumb', photo.id),
-  ]);
-  await client.storage.from(PRIVATE_BUCKET).remove([
-    objectKey(eventId, 'orig', photo.id, ext),
-    objectKey(eventId, 'raw', photo.id),
-    objectKey(eventId, 'print', photo.id),
-  ]);
+  if (typeof eventIdOrPhoto === 'string') return; // en Drive necesitamos el registro
+  await driveBackend.removePublicFiles(eventIdOrPhoto);
 }
 
 /* ══════════════════════════════════ URLs ═════════════════════════════════ */
 
 /**
- * URL para el navegador.
- * En disco todo pasa por /media (donde el servidor aplica la regla de acceso).
- * En Storage, lo público va directo al CDN y lo privado se sigue sirviendo por
- * /media para que la autorización siga siendo nuestra y no de una URL firmada
- * que alguien pueda reenviar.
+ * URL para el navegador. Siempre pasa por /media, en los dos modos: ahí es
+ * donde decidimos quién puede ver qué. En modo Drive la URL lleva el id del
+ * archivo, para no tener que buscar la foto en cada petición de imagen.
  */
-export function publicUrl(eventId, kind, photoId, ext = 'jpg') {
-  if (DRIVER === 'disk' || !KINDS[kind].public) {
-    return `/media/${eventId}/${kind}/${photoId}.${ext}`;
+export function urlFor(photo, kind) {
+  if (DRIVER === 'disk') {
+    const ext = kind === 'orig' ? (photo.originalExt || 'jpg') : 'jpg';
+    return `/media/${photo.eventId}/${kind}/${photo.id}.${ext}`;
   }
-  const base = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
-  return `${base}/storage/v1/object/public/${PUBLIC_BUCKET}/${objectKey(eventId, kind, photoId, ext)}`;
+  const fileId = photo.files?.[kind];
+  if (!fileId) return '';
+  return `/media/${photo.eventId}/${kind}/${fileId}.jpg`;
 }
+
+/**
+ * Movimientos de archivo que dispara la moderación.
+ * En disco no hay nada que mover (el estado vive en la base). En Drive sí: la
+ * carpeta ES el estado, y el logístico tiene que ver la cola de impresión
+ * correcta sin abrir la app.
+ */
+export async function onApproved(photo) {
+  if (DRIVER === 'disk') return;
+  await driveBackend.movePrint(photo, 'queue');
+}
+
+export async function onRejected(photo) {
+  if (DRIVER === 'disk') return;
+  await driveBackend.movePrint(photo, 'system');
+}
+
+export async function onPrinted(photo, printed) {
+  if (DRIVER === 'disk') return;
+  await driveBackend.movePrint(photo, printed ? 'printed' : 'queue');
+}
+
+export const IS_DRIVE = DRIVER === 'drive';
 
 export function extFromMime(mime) {
   return ({
@@ -188,7 +165,7 @@ export function extFromMime(mime) {
 
 /** Tamaño ocupado por un evento, para el panel de control. */
 export async function diskUsage(eventId) {
-  if (DRIVER !== 'disk') return 0; // en Storage lo reporta el dashboard de Supabase
+  if (DRIVER !== 'disk') return 0; // en Drive lo reporta el propio Drive
   let bytes = 0;
   const walk = async (d) => {
     let entries;
@@ -206,6 +183,6 @@ export async function diskUsage(eventId) {
 export function driverInfo() {
   return {
     driver: DRIVER,
-    ready: DRIVER === 'disk' ? true : Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
+    ready: DRIVER === 'disk' ? true : Boolean(process.env.GOOGLE_OAUTH_TOKEN_JSON || process.env.GOOGLE_OAUTH_CLIENT_ID),
   };
 }

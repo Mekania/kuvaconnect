@@ -9,9 +9,16 @@ Node 24 + Express (ESM), sharp, qrcode, googleapis, multer 2. Frontend vanilla s
 
 **Dos modos con el mismo código** (ver `DEPLOY.md`):
 - *evento*: `KUVA_STORE=json` + `KUVA_MEDIA=disk`, SSE, cola de Drive en background. Offline.
-- *nube*: `KUVA_STORE=supabase` + `KUVA_MEDIA=supabase` (se activa solo en Vercel), sondeo, Drive por petición.
+- *nube*: `KUVA_STORE=drive` + `KUVA_MEDIA=drive` (se activa solo en Vercel), sondeo.
 
-Supabase: proyecto **ops-hub** `oycannpqooiqomfudyna`, esquema `kuva`, buckets `kuva-public` / `kuva-private`.
+**No hay base de datos.** En modo nube, Drive es almacén y registro a la vez: el estado
+de una foto es su carpeta, y su registro son las `appProperties` de su archivo. Ver
+`src/lib/driveBackend.js`.
+
+Supabase quedó descartado. En el proyecto **ops-hub** (`oycannpqooiqomfudyna`) hay un
+esquema `kuva` y dos buckets `kuva-*` vacíos, creados por error y pendientes de borrar
+en cuanto el modo Drive esté probado:
+`drop schema kuva cascade;` + borrar los buckets `kuva-public` y `kuva-private`.
 
 ## Correr
 `npm install && npm start` → consola muestra enlaces. PIN panel `2468` (cambiar en `.env`).
@@ -24,7 +31,7 @@ Supabase: proyecto **ops-hub** `oycannpqooiqomfudyna`, esquema `kuva`, buckets `
 ## PENDIENTE (depende del usuario)
 1. **Publicar repo**: `gh repo create kuvaconnect --public --source=. --remote=origin --push`
 2. **Vercel**: `vercel link` + `vercel git connect` + variables de entorno (tabla en `DEPLOY.md`), luego `vercel --prod`.
-3. **Secreto que falta**: `SUPABASE_SERVICE_ROLE_KEY` (Supabase → Settings → API Keys). Sin eso el modo nube no arranca.
+3. **Probar el modo nube**: `npm run drive:selftest` (después de conectar Drive). Está escrito pero NO ejecutado: no hubo credenciales en la sesión.
 4. **Conectar Drive**: cliente OAuth tipo *Aplicación de escritorio* (no pide URIs de redirección, es normal) → `npm run drive:auth` → `DRIVE_ENABLED=true` → `npm run drive:check`. El alcance es `drive.file`, así que NO hay pantalla de "app no verificada".
 
 ## YA HECHO en esta sesión

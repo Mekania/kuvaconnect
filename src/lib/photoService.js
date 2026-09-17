@@ -30,8 +30,8 @@ export function publicPhoto(p) {
     printedAt: p.printedAt || null,
     flags: p.flags || [],
     urls: {
-      thumb: media.publicUrl(p.eventId, 'thumb', p.id),
-      web: media.publicUrl(p.eventId, 'web', p.id),
+      thumb: media.urlFor(p, 'thumb'),
+      web: media.urlFor(p, 'web'),
     },
     drive: {
       state: p.drive?.state || 'idle',
@@ -47,9 +47,9 @@ export function adminPhoto(p) {
     ...publicPhoto(p),
     urls: {
       ...publicPhoto(p).urls,
-      raw: media.publicUrl(p.eventId, 'raw', p.id),
-      print: media.publicUrl(p.eventId, 'print', p.id),
-      original: media.publicUrl(p.eventId, 'orig', p.id, p.originalExt || 'jpg'),
+      raw: media.urlFor(p, 'raw'),
+      print: media.urlFor(p, 'print'),
+      original: media.urlFor(p, 'orig'),
     },
     device: p.device,
     ip: p.ip,
@@ -69,7 +69,11 @@ export async function ingest(event, { buffer, mimeType, device, ip, caption, aut
   const started = Date.now();
 
   await media.ensureEventDirs(event.id);
-  await media.write(event.id, 'orig', id, buffer, ext);
+  // El consecutivo se calcula antes de escribir porque en Drive va en el nombre
+  // del archivo, que es lo que ordena la carpeta del logístico.
+  const seq = await nextSeq(event.id);
+  const files = {};
+  files.orig = await media.write(event.id, 'orig', id, buffer, ext, { seq, mimeType });
 
   const info = await analyze(buffer);
 
@@ -85,7 +89,8 @@ export async function ingest(event, { buffer, mimeType, device, ip, caption, aut
     const broken = await addPhoto({
       id,
       eventId: event.id,
-      seq: await nextSeq(event.id),
+      seq,
+      files,
       status: 'error',
       error: err.message,
       mimeType,
@@ -107,19 +112,21 @@ export async function ingest(event, { buffer, mimeType, device, ip, caption, aut
     makeRawPreview(buffer),
   ]);
 
-  await Promise.all([
-    media.write(event.id, 'print', id, framed.buffer),
-    media.write(event.id, 'web', id, web),
-    media.write(event.id, 'thumb', id, thumb),
-    media.write(event.id, 'raw', id, raw),
+  const meta = { seq, orientation: framed.orientation };
+  const [printId, webId, thumbId, rawId] = await Promise.all([
+    media.write(event.id, 'print', id, framed.buffer, 'jpg', meta),
+    media.write(event.id, 'web', id, web, 'jpg', meta),
+    media.write(event.id, 'thumb', id, thumb, 'jpg', meta),
+    media.write(event.id, 'raw', id, raw, 'jpg', meta),
   ]);
+  Object.assign(files, { print: printId, web: webId, thumb: thumbId, raw: rawId });
 
   const autoApprove = event.moderation === 'post';
-  const seq = await nextSeq(event.id);
   const photo = await addPhoto({
     id,
     eventId: event.id,
     seq,
+    files,
     status: autoApprove ? 'approved' : 'pending',
     orientation: framed.orientation,
     fitMode: framed.fitMode,
@@ -142,7 +149,10 @@ export async function ingest(event, { buffer, mimeType, device, ip, caption, aut
   });
 
   await queueOp(id, OPS.UPLOAD_ORIGINAL);
-  if (autoApprove) await queueOp(id, OPS.UPLOAD_PRINT);
+  if (autoApprove) {
+    await queueOp(id, OPS.UPLOAD_PRINT);
+    await media.onApproved(photo);
+  }
 
   publish(adminChannel(event.id), 'photo:new', adminPhoto(photo));
   if (autoApprove) publish(event.id, 'photo:new', publicPhoto(photo));
@@ -160,7 +170,8 @@ export async function approve(photoId, by = 'panel') {
 
   // Si venía de un rechazo, sus derivados públicos fueron borrados: hay que
   // volver a generarlos antes de anunciarla en la pantalla.
-  if (was === 'rejected' && !(await media.has(p.eventId, 'web', p.id))) {
+  const webMissing = media.IS_DRIVE ? !p.files?.web : !(await media.has(p.eventId, 'web', p.id));
+  if (was === 'rejected' && webMissing) {
     try {
       await recompose(p, await getEvent(p.eventId));
     } catch (err) {
@@ -174,6 +185,7 @@ export async function approve(photoId, by = 'panel') {
   });
   await queueOp(photoId, OPS.UPLOAD_PRINT);
   if (was === 'rejected') await queueOp(photoId, OPS.UPLOAD_ORIGINAL);
+  await media.onApproved(updated).catch((err) => log.warn(`mover impresión: ${err.message}`));
   publish(p.eventId, 'photo:new', publicPhoto(updated));
   publish(adminChannel(p.eventId), 'photo:updated', adminPhoto(updated));
   log.info(`aprobada #${updated.seq} (${photoId})`);
@@ -192,7 +204,8 @@ export async function reject(photoId, reason = '', by = 'panel') {
   // algo que no debía, no basta con sacarlo de la pantalla — hay que quitarlo
   // del disco público. El original y la copia de impresión se conservan (solo
   // los ve el panel) por si el rechazo fue un error.
-  media.removePublic(p.eventId, p.id).catch((err) => log.warn(`limpiando ${photoId}: ${err.message}`));
+  await media.onRejected(updated).catch((err) => log.warn(`sacar de la cola: ${err.message}`));
+  await media.removePublic(updated).catch((err) => log.warn(`limpiando ${photoId}: ${err.message}`));
 
   publish(p.eventId, 'photo:removed', { id: p.id });
   publish(adminChannel(p.eventId), 'photo:updated', adminPhoto(updated));
@@ -205,26 +218,31 @@ export async function markPrinted(photoId, printed = true) {
   if (!p) return null;
   const updated = await updatePhoto(photoId, { printedAt: printed ? new Date().toISOString() : null });
   if (printed) await queueOp(photoId, OPS.MOVE_PRINTED);
+  await media.onPrinted(updated, printed).catch((err) => log.warn(`archivar impresión: ${err.message}`));
   publish(adminChannel(p.eventId), 'photo:updated', adminPhoto(updated));
   return updated;
 }
 
 /** Recompone la impresión: útil si se cambia el marco a mitad de evento. */
 export async function recompose(photo, event) {
-  const original = await media.read(event.id, 'orig', photo.id, photo.originalExt || 'jpg');
+  const original = await media.readFor(photo, 'orig');
   const framed = await composeFramed(original, {
     frameId: event.frameId,
     fitMode: event.fitMode,
     ...frameMeta(event),
   });
   const { web, thumb } = await makeWebVersions(framed.buffer);
-  await Promise.all([
-    media.write(event.id, 'print', photo.id, framed.buffer),
-    media.write(event.id, 'web', photo.id, web),
-    media.write(event.id, 'thumb', photo.id, thumb),
+  const meta = { seq: photo.seq, orientation: framed.orientation };
+  const [printId, webId, thumbId] = await Promise.all([
+    media.write(event.id, 'print', photo.id, framed.buffer, 'jpg', meta),
+    media.write(event.id, 'web', photo.id, web, 'jpg', meta),
+    media.write(event.id, 'thumb', photo.id, thumb, 'jpg', meta),
   ]);
   const updated = await updatePhoto(photo.id, {
-    frameId: framed.frameId, orientation: framed.orientation, fitMode: framed.fitMode,
+    frameId: framed.frameId,
+    orientation: framed.orientation,
+    fitMode: framed.fitMode,
+    files: { ...(photo.files || {}), print: printId, web: webId, thumb: thumbId },
   });
 
   // La copia vieja de Drive ya no sirve: se reemplaza.

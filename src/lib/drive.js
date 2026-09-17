@@ -218,3 +218,61 @@ export async function whoAmI() {
   const { data } = await drive.about.get({ fields: 'user(displayName,emailAddress), storageQuota(limit,usage)' });
   return data;
 }
+
+/* ─────────────────── piezas para usar Drive como almacén ─────────────────── */
+
+/**
+ * En el modo nube, Drive no es solo el archivo del cliente: es la base de datos.
+ * El estado de cada foto vive en las `appProperties` de su archivo original, y
+ * la configuración del evento en la `description` de su carpeta. Estas son las
+ * operaciones que eso necesita y que la parte "archivo" no tenía.
+ */
+
+/** Lista archivos con una consulta de Drive. Devuelve también sus metadatos. */
+export async function listFiles(q, { fields = 'files(id,name,description,appProperties,createdTime,mimeType,parents)', pageSize = 200, orderBy } = {}) {
+  const drive = getDrive();
+  const { data } = await drive.files.list({
+    q,
+    fields: `nextPageToken, ${fields}`,
+    pageSize,
+    ...(orderBy ? { orderBy } : {}),
+    ...shared(),
+  });
+  return data.files || [];
+}
+
+export async function getFile(fileId, fields = 'id,name,description,appProperties,createdTime,parents') {
+  const drive = getDrive();
+  const { data } = await drive.files.get({ fileId, fields, supportsAllDrives: true });
+  return data;
+}
+
+/** Descarga el contenido de un archivo como Buffer. */
+export async function downloadFile(fileId) {
+  const drive = getDrive();
+  const res = await drive.files.get(
+    { fileId, alt: 'media', supportsAllDrives: true },
+    { responseType: 'arraybuffer' },
+  );
+  return Buffer.from(res.data);
+}
+
+/**
+ * Actualiza metadatos. `appProperties` se fusiona con lo que ya había, así que
+ * mandar `{ status: 'approved' }` no borra el resto; poner null en una clave sí
+ * la elimina (es como lo define la API de Drive).
+ */
+export async function setMeta(fileId, { appProperties, description, name } = {}) {
+  const drive = getDrive();
+  const { data } = await drive.files.update({
+    fileId,
+    requestBody: {
+      ...(appProperties ? { appProperties } : {}),
+      ...(description !== undefined ? { description } : {}),
+      ...(name ? { name } : {}),
+    },
+    fields: 'id,name,description,appProperties',
+    supportsAllDrives: true,
+  });
+  return data;
+}

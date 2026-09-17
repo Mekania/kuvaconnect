@@ -56,11 +56,12 @@ app.get('/media/:event/:kind/:file', async (req, res) => {
     return res.sendFile(abs);
   }
 
-  // En la nube el archivo vive en Storage. Los privados los servimos nosotros
-  // en vez de dar una URL firmada, para que la regla de acceso siga siendo
-  // nuestra y no un enlace que alguien pueda reenviar.
+  // En la nube el archivo vive en Drive y la URL trae su id directamente, para
+  // no tener que buscar la foto en cada peticion de imagen. Lo servimos
+  // nosotros en vez de dar un enlace publico de Drive, para que la regla de
+  // acceso siga siendo nuestra y no un enlace reenviable.
   try {
-    const buf = await media.read(event, kind, photoId, ext);
+    const buf = await media.read(event, kind, photoId, ext, photoId);
     res.type(ext === 'png' ? 'image/png' : 'image/jpeg').send(buf);
   } catch {
     res.status(404).end();

@@ -6,7 +6,7 @@ import { getEvent, getPhoto, countByStatus, listPhotos } from '../lib/db.js';
 import { publicEvent } from '../lib/eventService.js';
 import { ingest, feed, publicPhoto, HEIF_SUPPORTED } from '../lib/photoService.js';
 import { subscribe, clientCount } from '../lib/bus.js';
-import { publicUrl as mediaUrl } from '../lib/media.js';
+import { urlFor } from '../lib/media.js';
 import { logger } from '../lib/logger.js';
 
 const log = logger('api');
@@ -160,6 +160,6 @@ api.get('/photo/:id/status', async (req, res) => {
   res.json({
     status: p.status,
     seq: p.seq,
-    url: p.status === 'approved' ? mediaUrl(p.eventId, 'web', p.id) : null,
+    url: p.status === 'approved' ? urlFor(p, 'web') : null,
   });
 });
