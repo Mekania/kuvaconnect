@@ -1,11 +1,17 @@
-# HANDOFF — KuvaConnect (17-sep-2026)
+# HANDOFF — KuvaConnect (17-sep-2026, actualizado)
 
 ## Qué es
 Producto de Kuva (cabinas de fotos). Pantalla con QR + álbum en vivo → invitados suben foto desde el celular → logístico modera en panel → foto se compone con marco 10x15 (1200x1800 @300dpi) para imprimir en DNP → original + enmarcada a Google Drive.
 Leer primero: `README.md` (completo) y `assets/frames/LEEME.md`.
 
 ## Stack
-Node 24 + Express (ESM), sharp (composición, HEIC OK), qrcode, googleapis, multer 2. Frontend vanilla sin build. BD = JSON (`data/*.json`). Live = SSE. Todo en español.
+Node 24 + Express (ESM), sharp, qrcode, googleapis, multer 2. Frontend vanilla sin build. Todo en español.
+
+**Dos modos con el mismo código** (ver `DEPLOY.md`):
+- *evento*: `KUVA_STORE=json` + `KUVA_MEDIA=disk`, SSE, cola de Drive en background. Offline.
+- *nube*: `KUVA_STORE=supabase` + `KUVA_MEDIA=supabase` (se activa solo en Vercel), sondeo, Drive por petición.
+
+Supabase: proyecto **ops-hub** `oycannpqooiqomfudyna`, esquema `kuva`, buckets `kuva-public` / `kuva-private`.
 
 ## Correr
 `npm install && npm start` → consola muestra enlaces. PIN panel `2468` (cambiar en `.env`).
@@ -16,8 +22,15 @@ Node 24 + Express (ESM), sharp (composición, HEIC OK), qrcode, googleapis, mult
 ✅ Subida móvil (reescala a 3000px en navegador) · composición con marco (auto crop por atención / fondo difuminado si pierde >34%) · moderación con teclado (A/R/flechas) · cola de impresión · celebración de foto nueva en pantalla · columnas adaptativas · rechazar borra versiones públicas web/thumb · cola Drive con reintentos y backoff (local primero, nube después) · 3 marcos generados por código (classic, noir, polaroid) · soporte marcos PNG del cliente vía `assets/frames/<id>/frame.json`.
 
 ## PENDIENTE (depende del usuario)
-1. **Conectar Drive**: guardar `credentials/oauth-client.json` (OAuth app de escritorio, Drive API habilitada) → `npm run drive:auth` → `.env DRIVE_ENABLED=true` → `npm run drive:check`. NO usar service account en Drive personal (sin cuota).
-2. **Marco real** del diseñador: PNG 1200x1800 y 1800x1200 con hueco transparente.
+1. **Publicar repo**: `gh repo create kuvaconnect --public --source=. --remote=origin --push`
+2. **Vercel**: `vercel link` + `vercel git connect` + variables de entorno (tabla en `DEPLOY.md`), luego `vercel --prod`.
+3. **Secreto que falta**: `SUPABASE_SERVICE_ROLE_KEY` (Supabase → Settings → API Keys). Sin eso el modo nube no arranca.
+4. **Conectar Drive**: cliente OAuth tipo *Aplicación de escritorio* (no pide URIs de redirección, es normal) → `npm run drive:auth` → `DRIVE_ENABLED=true` → `npm run drive:check`. El alcance es `drive.file`, así que NO hay pantalla de "app no verificada".
+
+## YA HECHO en esta sesión
+- Marcos reales de OXXO instalados (`assets/frames/oxxo-expresate/`), hueco detectado por canal alfa: vertical `x=63 y=258 1060x1237`, horizontal `x=70 y=121 1627x846`.
+- Las tres páginas rediseñadas con la identidad de la campaña.
+- Backend refactorizado a async con drivers intercambiables.
 
 ## Ideas siguientes (no hechas)
 - Sesiones del panel persistentes (hoy en memoria, se pierden al reiniciar).
