@@ -156,6 +156,7 @@ export function publicEvent(ev) {
     slug: ev.slug,
     name: ev.name,
     sede: ev.sede || '',
+    archived: Boolean(ev.archived),
     subtitle: ev.subtitle,
     date: ev.date,
     hashtag: ev.hashtag,

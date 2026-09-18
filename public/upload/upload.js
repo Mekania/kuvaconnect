@@ -127,6 +127,12 @@ $('#send').addEventListener('click', async () => {
     }
     step('stepDone');
   } catch (err) {
+    if (/ya no está activo/.test(err.message)) {
+      $('#closedTitle').textContent = 'Este link ya no está activo';
+      $('#closedMsg').textContent = 'Escanea el QR que está en la pantalla de tu sede.';
+      step('stepClosed');
+      return;
+    }
     toast(err.message, 'error', 5000);
     step('stepReview');
   }
@@ -203,7 +209,13 @@ async function boot() {
     ? '<i>👀</i> Un moderador la revisa antes de que salga en pantalla.'
     : '<i>⚡</i> Tu foto sale en la pantalla en cuestión de segundos.';
 
-  if (!event.uploadEnabled) step('stepClosed');
+  if (event.archived) {
+    $('#closedTitle').textContent = 'Este link ya no está activo';
+    $('#closedMsg').textContent = 'Escanea el QR que está en la pantalla de tu sede.';
+    step('stepClosed');
+  } else if (!event.uploadEnabled) {
+    step('stepClosed');
+  }
 }
 
 boot();

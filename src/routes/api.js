@@ -62,6 +62,7 @@ api.get('/event/:event/feed', withEvent, async (req, res) => {
   res.json({
     photos: await feed(req.event.id, { limit }),
     counts: await countByStatus(req.event.id),
+    archived: Boolean(req.event.archived),
   });
 });
 
@@ -114,6 +115,16 @@ api.post('/event/:event/upload', withEvent, (req, res) => {
       return res.status(400).json({ error: msg });
     }
 
+    // Un evento archivado no puede recibir fotos: nadie lo modera ni lo
+    // proyecta, así que una foto que entre ahí se pierde sin que nadie lo note.
+    // Pasó: un celular con la página de subida vieja abierta mandó una foto de
+    // Bogotá al evento de pruebas.
+    if (ev.archived) {
+      return res.status(410).json({
+        error: 'Este link ya no está activo. Escanea el QR de la pantalla de tu sede.',
+        archived: true,
+      });
+    }
     if (!ev.uploadEnabled) {
       return res.status(403).json({ error: 'Las subidas están cerradas por ahora.' });
     }

@@ -201,6 +201,21 @@ function burstConfetti(n = 26) {
 
 /* ──────────────────────────────── arranque ──────────────────────────────── */
 
+/**
+ * Retira una pantalla cuyo evento se archivó.
+ * Una pestaña vieja abierta en un proyector seguiría mostrando un QR que manda
+ * las fotos a un evento que nadie modera. Se quita el QR y se deja un aviso.
+ */
+function retire() {
+  $('.qr-card')?.remove();
+  $('#title').textContent = 'Pantalla inactiva';
+  $('#subtitle').textContent = 'Esta pantalla ya no está en uso. Abre el link de la pantalla de tu sede.';
+  document.querySelector('.steps')?.remove();
+  document.querySelector('.meta')?.remove();
+  album.replaceChildren();
+  window.__kuvaRetired = true; // el ciclo de sondeo lo lee y se detiene
+}
+
 /** Deja la celebración justo debajo de la franja del QR (ver .hero en el CSS). */
 function placeHero() {
   const stage = document.querySelector('.stage');
@@ -256,6 +271,7 @@ async function boot() {
   }
 
   eventId = info.event.id;
+  if (info.event.archived) { retire(); return; }
   applyTheme(info.event);
   placeHero();
   // Las fuentes y el QR cambian la altura de la franja al terminar de cargar.
@@ -303,7 +319,8 @@ async function boot() {
 const POLL_MS = 3000;
 
 async function resync(onNew, onRemoved, { celebrate: doCelebrate = true } = {}) {
-  const { photos, counts } = await api(`/api/event/${eventId}/feed?limit=${MAX_TILES}`);
+  const { photos, counts, archived } = await api(`/api/event/${eventId}/feed?limit=${MAX_TILES}`);
+  if (archived) { retire(); return; }
   setOnline(true);
   const live = new Set(photos.map((p) => p.id));
 
@@ -327,7 +344,7 @@ function pollLoop(onNew, onRemoved) {
     } catch {
       setOnline(false);
     }
-    setTimeout(tick, POLL_MS);
+    if (!window.__kuvaRetired) setTimeout(tick, POLL_MS);
   };
   tick();
 }
