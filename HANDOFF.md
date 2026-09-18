@@ -20,6 +20,22 @@ esquema `kuva` y dos buckets `kuva-*` vacíos, creados por error y pendientes de
 en cuanto el modo Drive esté probado:
 `drop schema kuva cascade;` + borrar los buckets `kuva-public` y `kuva-private`.
 
+## SEDES (18-sep-2026)
+El evento corre en simultáneo en 4 sedes: Bogotá, Bucaramanga, Barranquilla, Medellín.
+Cada sede = un evento propio (slug `bogota`, `bucaramanga`, `barranquilla`, `medellin`)
+con su pantalla `/d/<slug>`, su QR `/u/<slug>?t=...`, su carpeta de Drive
+("Exprésate 24/7 · <Sede>") y su PIN.
+- Panel único `/admin`: se elige sede + PIN. La sesión queda atada a esa sede
+  (token `exp.eventId.firma`); el PIN maestro (ADMIN_PIN) entra a todas y es el
+  único que ve ajustes/Drive.
+- PIN guardados como hash (sha256 con el id del evento). Los PIN en claro están
+  SOLO en `credentials/pines-sedes.txt` (fuera de git).
+- `npm run sedes` crea/revisa las sedes en producción; `-- --reset-pins` regenera PIN;
+  `-- --local` lo hace en modo evento.
+- La celebración de foto nueva cubre solo el álbum, nunca el QR.
+- OJO: el modo local con DRIVE_ENABLED=true sincroniza con el MISMO Drive de
+  producción. Para probar en local dejar DRIVE_ENABLED=false (así quedó el .env).
+
 ## EN PRODUCCIÓN (17-sep-2026)
 - Repo: https://github.com/Mekania/kuvaconnect (público, auto-despliega en cada push)
 - App:  https://kuvaconnect.vercel.app
