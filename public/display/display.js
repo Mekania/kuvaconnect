@@ -228,6 +228,9 @@ function placeHero() {
 
 function applyTheme(ev) {
   document.title = `${ev.sede ? `${ev.sede} · ` : ''}${ev.name} · KuvaConnect`;
+  // Nombre bajo el ícono al instalarla en el iPad.
+  document.querySelector('meta[name="apple-mobile-web-app-title"]')
+    ?.setAttribute('content', ev.sede ? `OXXO ${ev.sede}` : ev.name);
   if (ev.sede) {
     $('#sedeName').textContent = ev.sede;
     $('#sede').hidden = false;
@@ -350,6 +353,19 @@ function pollLoop(onNew, onRemoved) {
 }
 
 boot();
+
+/**
+ * Recarga de emergencia: tres toques seguidos en la franja superior.
+ * Instalada como app no hay barra de Safari ni F5, y si algo se queda raro en
+ * pleno evento el logístico necesita una salida que no sea cerrar la app.
+ */
+let taps = [];
+document.querySelector('.stage')?.addEventListener('pointerup', () => {
+  const now = Date.now();
+  taps = taps.filter((t) => now - t < 900);
+  taps.push(now);
+  if (taps.length >= 3) location.reload();
+});
 
 // Si cambian el proyector de resolución o rotan el tótem, recalculamos.
 let resizeTimer;

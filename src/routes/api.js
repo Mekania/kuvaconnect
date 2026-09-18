@@ -73,6 +73,42 @@ api.get('/event/:event/stream', withEvent, async (req, res) => {
   res.write(`event: hello\ndata: ${JSON.stringify({ event: publicEvent(req.event), counts })}\n\n`);
 });
 
+/* ───────────────────────────── app instalable ─────────────────────────────── */
+
+/**
+ * Manifiesto de la pantalla como app ("Agregar a inicio" en el iPad).
+ *
+ * Es uno POR SEDE y no uno global a propósito: al instalarla, el sistema abre
+ * siempre `start_url`. Con un manifiesto único, el iPad de Medellín abriría la
+ * pantalla que dijera ese manifiesto, no la suya. Con `id` y `scope` propios,
+ * además, cada sede queda como una app distinta en el mismo dispositivo.
+ */
+api.get('/manifest/:event', withEvent, (req, res) => {
+  const ev = req.event;
+  const start = `/d/${ev.slug}`;
+  const label = ev.sede ? `OXXO ${ev.sede}` : ev.name;
+  res.set('Content-Type', 'application/manifest+json; charset=utf-8').set('Cache-Control', 'no-store');
+  res.send(JSON.stringify({
+    id: start,
+    name: `${ev.name}${ev.sede ? ` · ${ev.sede}` : ''}`,
+    short_name: label,
+    description: 'Pantalla del evento: QR para subir fotos y álbum en vivo.',
+    start_url: start,
+    scope: start,
+    display: 'fullscreen',
+    display_override: ['fullscreen', 'standalone'],
+    orientation: 'any',
+    background_color: ev.theme?.brand || '#C41D5D',
+    theme_color: ev.theme?.brand || '#C41D5D',
+    lang: 'es-CO',
+    icons: [
+      { src: '/shared/brand/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: '/shared/brand/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: '/shared/brand/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+    ],
+  }));
+});
+
 /* ────────────────────────────────── QR ───────────────────────────────────── */
 
 api.get('/event/:event/qr.png', withEvent, async (req, res) => {
