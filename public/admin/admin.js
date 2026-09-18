@@ -177,38 +177,79 @@ function card(p, { mode }) {
 let printFrame = null;
 
 /**
- * Documento que se manda a la impresora.
+ * ─────────────────────────────────────────────────────────────────────────────
+ *  IMPRESIÓN
+ * ─────────────────────────────────────────────────────────────────────────────
+ *  El diálogo de impresión se conserva (es donde el operador controla la
+ *  impresora), pero se le entrega SIEMPRE el mismo trabajo:
  *
- * Dos decisiones, las dos aprendidas en una prueba real:
+ *    · una hoja 4x6 pulgadas VERTICAL, sin márgenes,
+ *    · con la foto llenándola completa.
  *
- *  - Se pide papel de 4x6 PULGADAS, no 10x15 cm. Es el nombre con el que los
- *    drivers de la DNP (y casi todas las impresoras de foto) declaran ese papel,
- *    y Chrome solo respeta el tamaño pedido si el driver tiene uno que coincida.
- *    Tienen la misma proporción 2:3, así que el marco no se deforma.
+ *  Las fotos horizontales se giran 90° antes de mandarlas. El papel de la DNP
+ *  es el mismo 4x6 en los dos casos y el resultado físico es idéntico (la foto
+ *  sale girada en la hoja, igual que si el driver la girara), pero así el
+ *  diálogo nunca cambia de orientación ni de tamaño entre una foto y la otra:
+ *  se configura una vez y sirve para todas.
  *
- *  - La foto NO va en medidas fijas: llena la hoja que haya (object-fit:
- *    contain), centrada. Si el driver ignora el tamaño y usa otro papel, la foto
- *    igual sale lo más grande posible y sin recortar el marco, en vez de quedar
- *    pegada a una esquina con todo lo demás en blanco.
+ *  Se pide 4x6 PULGADAS y no 10x15 cm porque así declaran ese papel los drivers
+ *  de las impresoras de foto; Chrome solo respeta el tamaño pedido cuando el
+ *  driver tiene uno que coincida. Misma proporción 2:3, el marco no se deforma.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
-function printDocument(src, { landscape = false, title = 'Kuva' } = {}) {
-  const size = landscape ? '6in 4in' : '4in 6in';
+
+const PRINT_GUIDE_KEY = 'kuva.printGuide.hidden';
+
+function printDocument(src, title = 'Kuva') {
   return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
     <style>
-      @page { size: ${size}; margin: 0; }
+      @page { size: 4in 6in; margin: 0; }
       html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #fff; }
       body { display: flex; align-items: center; justify-content: center; overflow: hidden; }
       img { display: block; width: 100%; height: 100%; object-fit: contain; }
     </style></head><body><img src="${src}"></body></html>`;
 }
 
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('No se pudo cargar el archivo de impresión.'));
+    img.src = src;
+  });
+}
+
 /**
- * Manda la foto a la impresora desde el panel.
- * Un navegador no puede elegir impresora ni imprimir en silencio: abre el
- * diálogo. Para imprimir directo, sin diálogo, ver el acceso directo con
- * --kiosk-printing en IMPRESION.md.
+ * Devuelve la imagen lista para una hoja vertical: tal cual si ya es vertical,
+ * girada 90° si es horizontal. El giro se hace aquí, en el navegador, sobre el
+ * archivo de 300 dpi, sin pasar por el servidor.
  */
-function printPhoto(p) {
+async function printableImage(p) {
+  const img = await loadImage(p.urls.print);
+  if (img.naturalWidth <= img.naturalHeight) return { src: p.urls.print, revoke: null };
+
+  const canvas = document.createElement('canvas');
+  canvas.width = img.naturalHeight;
+  canvas.height = img.naturalWidth;
+  const ctx = canvas.getContext('2d');
+  ctx.translate(canvas.width, 0);
+  ctx.rotate(Math.PI / 2);
+  ctx.drawImage(img, 0, 0);
+  const blob = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.97));
+  const url = URL.createObjectURL(blob);
+  return { src: url, revoke: () => URL.revokeObjectURL(url) };
+}
+
+/** Abre el diálogo del sistema con la hoja ya preparada. */
+async function sendToPrinter(p) {
+  let prepared;
+  try {
+    prepared = await printableImage(p);
+  } catch (err) {
+    toast(err.message, 'error');
+    return;
+  }
+
   if (!printFrame) {
     printFrame = el('iframe', { 'aria-hidden': 'true', style: 'position:fixed;left:-9999px;width:0;height:0;border:0' });
     document.body.append(printFrame);
@@ -216,10 +257,7 @@ function printPhoto(p) {
 
   const doc = printFrame.contentWindow.document;
   doc.open();
-  doc.write(printDocument(p.urls.print, {
-    landscape: p.orientation === 'landscape',
-    title: `Kuva ${String(p.seq).padStart(3, '0')}`,
-  }));
+  doc.write(printDocument(prepared.src, `Kuva ${String(p.seq).padStart(3, '0')}`));
   doc.close();
 
   const img = doc.querySelector('img');
@@ -227,19 +265,61 @@ function printPhoto(p) {
     const win = printFrame.contentWindow;
     win.focus();
     win.onafterprint = () => {
-      // No hay forma de saber si salió bien o si cancelaron: se pregunta.
-      if (!p.printedAt && confirm(`¿Marcar la foto #${String(p.seq).padStart(3, '0')} como impresa?`)) {
+      prepared.revoke?.();
+      // No hay forma de saber si salió bien o si la cancelaron: se pregunta.
+      if (!p.printedAt && confirm(`¿Salió bien? ¿Marcar la foto #${String(p.seq).padStart(3, '0')} como impresa?`)) {
         act(p.id, 'printed');
       }
     };
     win.print();
   };
   if (img.complete) go();
-  else {
-    img.onload = go;
-    img.onerror = () => toast('No se pudo cargar el archivo de impresión.', 'error');
-  }
+  else img.onload = go;
 }
+
+/**
+ * Antes del diálogo del sistema, una guía con la vista previa de la hoja y los
+ * cuatro ajustes que hay que revisar. Se puede ocultar cuando el operador ya
+ * la aprendió (y volver a mostrar desde la cola de impresión).
+ */
+let pendingPrint = null;
+
+function hidePrintGuide() {
+  try { return localStorage.getItem(PRINT_GUIDE_KEY) === '1'; } catch { return false; }
+}
+
+async function printPhoto(p) {
+  if (hidePrintGuide()) return sendToPrinter(p);
+
+  pendingPrint = p;
+  const landscape = p.orientation === 'landscape';
+  $('#ppSeq').textContent = `#${String(p.seq).padStart(3, '0')}`;
+  $('#ppNote').textContent = landscape
+    ? 'Esta foto es horizontal: sale girada en la hoja 4×6. Es normal, el papel es el mismo.'
+    : 'Esta foto es vertical: sale derecha en la hoja 4×6.';
+  $('#ppSheet').className = `pp-sheet ${landscape ? 'is-landscape' : ''}`;
+  $('#ppImg').src = p.urls.web;
+  $('#ppHide').checked = false;
+  $('#printPrep').classList.add('on');
+}
+
+function closePrintGuide() {
+  $('#printPrep').classList.remove('on');
+  pendingPrint = null;
+}
+
+$('#ppGo').addEventListener('click', () => {
+  const p = pendingPrint;
+  if ($('#ppHide').checked) { try { localStorage.setItem(PRINT_GUIDE_KEY, '1'); } catch { /* nada */ } }
+  closePrintGuide();
+  if (p) sendToPrinter(p);
+});
+$('#ppCancel').addEventListener('click', closePrintGuide);
+$('#printPrep').addEventListener('click', (e) => { if (e.target.id === 'printPrep') closePrintGuide(); });
+$('#showPrintGuide').addEventListener('click', () => {
+  try { localStorage.removeItem(PRINT_GUIDE_KEY); } catch { /* nada */ }
+  toast('La guía de impresión se mostrará otra vez antes de imprimir.', 'ok');
+});
 
 async function removePhoto(p) {
   const n = `#${String(p.seq).padStart(3, '0')}`;
@@ -407,6 +487,7 @@ function highlightCursor() {
 }
 
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && $('#printPrep').classList.contains('on')) return closePrintGuide();
   if (e.target.matches('input, textarea, select')) return;
 
   if (e.key === 'Escape' && state.lightbox) return closeLightbox();

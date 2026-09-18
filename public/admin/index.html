@@ -113,6 +113,49 @@
   .empty-state .big { font-weight: 900; font-size: 1.4rem; color: var(--brand); text-transform: uppercase; }
 
   /* ──────────────────────────────── lightbox ────────────────────────────── */
+  /* ─────────────────────────── guía de impresión ────────────────────────── */
+  .pp {
+    position: fixed; inset: 0; z-index: 110; display: none;
+    place-items: center; padding: 18px;
+    background: rgba(58, 10, 33, .72);
+  }
+  .pp.on { display: grid; }
+  .pp-card {
+    background: var(--paper-2); border-radius: var(--r-md); box-shadow: var(--shadow);
+    width: min(760px, 100%); max-height: calc(100dvh - 36px); overflow: auto;
+    display: grid; grid-template-columns: 220px 1fr; gap: 24px; padding: 24px;
+  }
+  .pp-preview { display: grid; gap: 10px; justify-items: center; align-content: start; }
+  /* La hoja siempre vertical, igual que lo que recibe la impresora. */
+  .pp-sheet {
+    width: 180px; aspect-ratio: 2 / 3; background: #fff; overflow: hidden;
+    box-shadow: 0 0 0 1px var(--line), 0 10px 24px rgba(58,10,33,.18);
+    display: grid; place-items: center; position: relative;
+  }
+  .pp-sheet img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .pp-sheet.is-landscape img { width: 150%; height: 66.667%; max-width: none; transform: rotate(90deg); }
+  .pp-cap { font-size: .72rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-faint); }
+  .pp-body { display: grid; gap: 14px; align-content: start; }
+  .pp-body h2 { color: var(--brand); text-transform: uppercase; font-size: 1.3rem; }
+  .pp-note { margin: 0; font-weight: 700; color: var(--ink); background: var(--sand); padding: .7em .9em; border-radius: var(--r-sm); }
+  .pp-steps { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; counter-reset: pp; }
+  .pp-steps li {
+    counter-increment: pp; display: grid; grid-template-columns: 26px 150px 1fr; gap: 10px; align-items: center;
+    font-size: .9rem; padding: .55em .7em; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line);
+  }
+  .pp-steps li::before {
+    content: counter(pp); display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
+    background: var(--brand); color: #fff; font-weight: 900; font-size: .75rem;
+  }
+  .pp-steps b { font-weight: 800; }
+  .pp-steps span { color: var(--ink-soft); font-weight: 600; }
+  .pp-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+  @media (max-width: 640px) {
+    .pp-card { grid-template-columns: 1fr; }
+    .pp-steps li { grid-template-columns: 26px 1fr; }
+    .pp-steps span { grid-column: 2; }
+  }
+
   .lb {
     position: fixed; inset: 0; z-index: 100; display: none;
     background: rgba(58, 10, 33, .95);
@@ -229,7 +272,7 @@
             <option value="impresas">Solo ya impresas</option>
           </select>
           <span class="pill pill-gold" id="printCount"></span>
-          <span class="hint">Imprime directo desde aquí. La primera vez elige la DNP en el diálogo y queda predeterminada.</span>
+          <button class="btn btn-sm btn-ghost" id="showPrintGuide" type="button">Guía de impresión</button>
         </div>
         <div class="grid" id="gPrint"></div>
       </section>
@@ -337,6 +380,34 @@
   </div>
 
   <!-- lightbox -->
+  <!-- guía antes del diálogo de impresión -->
+  <div class="pp" id="printPrep" role="dialog" aria-modal="true" aria-labelledby="ppTitle">
+    <div class="pp-card">
+      <div class="pp-preview">
+        <div class="pp-sheet" id="ppSheet"><img id="ppImg" alt=""></div>
+        <div class="pp-cap">Hoja 4×6 · <span id="ppSeq"></span></div>
+      </div>
+      <div class="pp-body">
+        <h2 id="ppTitle">Antes de imprimir</h2>
+        <p class="pp-note" id="ppNote"></p>
+        <p class="hint" style="margin:0">En el cuadro de impresión que se abre, revisa:</p>
+        <ol class="pp-steps">
+          <li><b>Destino</b><span>la impresora DNP</span></li>
+          <li><b>Tamaño de papel</b><span>4 × 6 (en la DNP puede decir “PC 4x6”)</span></li>
+          <li><b>Márgenes</b><span>Ninguno</span></li>
+          <li><b>Escala</b><span>Predeterminada</span></li>
+        </ol>
+        <p class="hint" style="margin:0">Chrome recuerda estos ajustes: normalmente solo hay que revisarlos la primera vez.
+          Todas las fotos, verticales y horizontales, usan exactamente la misma configuración.</p>
+        <label class="switch"><input type="checkbox" id="ppHide"> <span>No volver a mostrar esta guía</span></label>
+        <div class="pp-actions">
+          <button class="btn btn-ghost" id="ppCancel" type="button">Cancelar</button>
+          <button class="btn btn-brand" id="ppGo" type="button">🖨 Abrir impresión</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="lb" id="lb">
     <div class="lb-head">
       <span class="pill pill-gold" id="lbSeq"></span>
