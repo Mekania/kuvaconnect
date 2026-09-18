@@ -1,6 +1,7 @@
 import { addEvent, getEvent, listEvents, updateEvent } from './db.js';
 import { ensureEventDirs } from './media.js';
 import { shortId, slugify, token } from './ids.js';
+import { hashPin, safeEqual } from './auth.js';
 import { getFrame } from './frames/index.js';
 import { logger } from './logger.js';
 
@@ -51,14 +52,29 @@ export async function createEvent(input = {}) {
   let n = 2;
   while (taken.has(slug)) slug = `${base}-${n++}`;
 
+  // Si el marco pedido no existe, getFrame cae al genérico sin avisar. Al crear
+  // un evento eso es un error de configuración (pasó: los marcos PNG no estaban
+  // cargados y las cuatro sedes quedaron con el marco equivocado), así que aquí
+  // se falla fuerte en vez de imprimir cientos de fotos con otro marco.
+  const wantedFrame = input.frameId || DEFAULTS.frameId;
+  if (getFrame(wantedFrame).id !== wantedFrame) {
+    throw new Error(`El marco "${wantedFrame}" no está cargado. ¿Se llamó loadOverlayFrames() antes?`);
+  }
+
+  const id = shortId(6);
   const ev = {
-    id: shortId(6),
+    id,
     slug,
     name,
+    // Sede: el mismo evento corre en varias ciudades a la vez, cada una con su
+    // pantalla, su QR, su carpeta de Drive y su PIN de moderación.
+    sede: input.sede || '',
+    pinHash: input.pin ? hashPin(id, input.pin) : '',
+    archived: false,
     subtitle: input.subtitle || 'Sube tu foto y verla en pantalla',
     date: input.date || new Date().toISOString().slice(0, 10),
     hashtag: input.hashtag || '',
-    frameId: getFrame(input.frameId || DEFAULTS.frameId).id,
+    frameId: wantedFrame,
     frameTitle: input.frameTitle || '',
     frameFooter: input.frameFooter || '',
     fitMode: input.fitMode || DEFAULTS.fitMode,
@@ -88,7 +104,8 @@ export async function ensureDefaultEvent() {
   const existing = await listEvents();
   if (existing.length) {
     await Promise.all(existing.map((e) => ensureEventDirs(e.id)));
-    return existing.find((e) => e.active) || existing[0];
+    const visible = existing.filter((e) => !e.archived);
+    return visible.find((e) => e.active) || visible[0] || existing[0];
   }
   return createEvent({
     name: 'Exprésate 24/7',
@@ -105,8 +122,24 @@ export async function ensureDefaultEvent() {
 }
 
 export async function activeEvent() {
-  const all = await listEvents();
+  const all = (await listEvents()).filter((e) => !e.archived);
   return all.find((e) => e.active) || all[0] || null;
+}
+
+/** Sedes visibles para el panel y las pantallas (las archivadas no aparecen). */
+export async function listSedes() {
+  return (await listEvents()).filter((e) => !e.archived);
+}
+
+export function checkSedePin(ev, pin) {
+  return Boolean(ev?.pinHash) && safeEqual(ev.pinHash, hashPin(ev.id, pin));
+}
+
+/** Lo que el panel puede ver de un evento: todo menos el hash del PIN. */
+export function adminEvent(ev) {
+  if (!ev) return null;
+  const { pinHash, ...rest } = ev;
+  return { ...rest, hasPin: Boolean(pinHash) };
 }
 
 export async function setActive(eventId) {
@@ -122,6 +155,7 @@ export function publicEvent(ev) {
     id: ev.id,
     slug: ev.slug,
     name: ev.name,
+    sede: ev.sede || '',
     subtitle: ev.subtitle,
     date: ev.date,
     hashtag: ev.hashtag,

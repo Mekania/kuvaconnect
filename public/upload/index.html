@@ -33,6 +33,13 @@
   .top h1 { font-size: clamp(1.6rem, 8vw, 2.3rem); text-transform: uppercase; text-shadow: 0 3px 0 rgba(110,7,48,.32); position: relative; }
   .top .sub { margin: .55rem 0 0; color: var(--on-brand-soft); font-size: .98rem; font-weight: 600; position: relative; }
   .top .eyebrow { position: relative; }
+  .sede-tag {
+    position: relative; display: inline-block; margin: .7rem 0 0;
+    background: var(--gold); color: #40300A; border-radius: 999px;
+    padding: .3em .95em; font-size: .78rem; font-weight: 900;
+    letter-spacing: .12em; text-transform: uppercase; box-shadow: 0 4px 0 #A87E12;
+  }
+  .sede-tag[hidden] { display: none; }
 
   /* Borde ondulado que entrega el magenta a la hoja blanca. */
   .top::after {
@@ -146,6 +153,7 @@
     <img class="logo" src="/shared/brand/oxxo.webp" alt="OXXO" id="brandLogo">
     <p class="eyebrow" id="eyebrow">Exprésate 24/7</p>
     <h1 id="title">Cargando…</h1>
+    <p class="sede-tag" id="sedeTag" hidden>📍 <span id="sedeName"></span></p>
     <p class="sub" id="subtitle"></p>
   </header>
 

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { config, baseUrl, lanIP } from './config.js';
 import { api, uploadUrl } from './routes/api.js';
 import { admin } from './routes/admin.js';
-import { isAdmin } from './lib/auth.js';
+import { canAccess } from './lib/auth.js';
 import { getEvent, driverInfo as dbDriver } from './lib/db.js';
 import { ensureDefaultEvent, activeEvent } from './lib/eventService.js';
 import { loadOverlayFrames, listFrames } from './lib/frames/index.js';
@@ -33,7 +33,8 @@ const PROTECTED_KINDS = new Set(['orig', 'raw', 'print']);
 app.get('/media/:event/:kind/:file', async (req, res) => {
   const { event, kind, file } = req.params;
   if (!KINDS[kind]) return res.status(404).end();
-  if (PROTECTED_KINDS.has(kind) && !isAdmin(req)) return res.status(403).end();
+  // Lo privado solo lo ve una sesión de ESA sede (o el maestro).
+  if (PROTECTED_KINDS.has(kind) && !canAccess(req, event)) return res.status(403).end();
   if (!/^[A-Za-z0-9._-]+$/.test(file) || file.includes('..')) return res.status(400).end();
 
   try {

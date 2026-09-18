@@ -31,11 +31,34 @@ const state = {
 
 /* ─────────────────────────────── sesión ─────────────────────────────────── */
 
+const SEDE_KEY = 'kuva.sede';
+const label = (e) => e.sede || e.name;
+
+/** Llena el selector de sede del login y recuerda la última elegida. */
+async function loadSedes() {
+  const sel = $('#sedeSel');
+  try {
+    const { sedes } = await api('/api/sedes');
+    let last = '';
+    try { last = localStorage.getItem(SEDE_KEY) || ''; } catch { /* sin almacenamiento */ }
+    sel.replaceChildren(
+      el('option', { value: '' }, 'Elige tu sede'),
+      ...sedes.map((s) => el('option', { value: s.id, ...(s.id === last ? { selected: 'selected' } : {}) }, label(s))),
+    );
+    (sel.value ? $('#pin') : sel).focus();
+  } catch {
+    sel.replaceChildren(el('option', { value: '' }, 'No se pudieron cargar las sedes'));
+  }
+}
+
 $('#loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
+  const event = $('#sedeSel').value;
+  if (!event) { toast('Elige tu sede', 'error'); $('#sedeSel').focus(); return; }
   try {
-    await api('/api/admin/login', { method: 'POST', body: { pin: $('#pin').value } });
-    start();
+    await api('/api/admin/login', { method: 'POST', body: { event, pin: $('#pin').value } });
+    try { localStorage.setItem(SEDE_KEY, event); } catch { /* sin almacenamiento */ }
+    start(event);
   } catch {
     toast('PIN incorrecto', 'error');
     $('#pin').value = '';
@@ -597,14 +620,29 @@ async function bootstrap(preferEventId) {
   const boot = await api('/api/admin/bootstrap');
   state.frames = boot.frames;
   state.base = boot.baseUrl;
+  state.master = boot.master;
 
-  const eventId = preferEventId || boot.activeEventId || boot.events[0]?.id;
-  if (!eventId) return toast('No hay eventos. Crea uno.', 'error');
+  const allowed = boot.events.map((e) => e.id);
+  const eventId = (allowed.includes(preferEventId) && preferEventId) || boot.activeEventId || allowed[0];
+  if (!eventId) return toast('No hay sedes configuradas.', 'error');
   state.eventId = eventId;
 
+  // Un moderador de sede solo ve su sede: sin selector, con su nombre fijo.
+  // El maestro puede saltar entre sedes.
+  const current = boot.events.find((e) => e.id === eventId);
+  $('#sedeBadge').textContent = `📍 ${current ? label(current) : ''}`;
+  $('#sedeBadge').hidden = boot.master;
+  $('#eventSel').hidden = !boot.master;
   $('#eventSel').replaceChildren(...boot.events.map((e) => el('option', {
     value: e.id, ...(e.id === eventId ? { selected: 'selected' } : {}),
-  }, e.name)));
+  }, label(e))));
+
+  // Ajustes y Drive son del maestro, aunque alguien escriba ?avanzado=1.
+  if (!boot.master) {
+    $$('nav.tabs button').forEach((b) => {
+      if (b.dataset.view === 'settings' || b.dataset.view === 'system') b.remove();
+    });
+  }
 
   // El transporte en vivo lo dicta el servidor (SSE en local, sondeo en la nube).
   state.live = (await api(`/api/event/${eventId}`).catch(() => ({}))).live || 'sse';
@@ -614,21 +652,25 @@ async function bootstrap(preferEventId) {
   state.uploadUrl = detail.uploadUrl;
   state.diskBytes = detail.diskBytes;
 
-  fillSettings(state.event);
-  renderLinks();
+  if (boot.master) {
+    fillSettings(state.event);
+    renderLinks();
+  }
   await loadPhotos();
   connect();
-  refreshDrive();
+  if (boot.master) refreshDrive();
 }
 
-async function start() {
+async function start(preferEventId) {
   $('#gate').style.display = 'none';
   $('#app').classList.add('on');
-  await bootstrap();
+  let prefer = preferEventId;
+  if (!prefer) { try { prefer = localStorage.getItem(SEDE_KEY) || undefined; } catch { /* nada */ } }
+  await bootstrap(prefer);
 }
 
 (async function init() {
   const { authenticated } = await api('/api/admin/session').catch(() => ({ authenticated: false }));
   if (authenticated) start();
-  else $('#pin').focus();
+  else loadSedes();
 })();

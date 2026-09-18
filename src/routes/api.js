@@ -3,7 +3,7 @@ import multer from 'multer';
 import QRCode from 'qrcode';
 import { config, baseUrl } from '../config.js';
 import { getEvent, getPhoto, countByStatus, listPhotos } from '../lib/db.js';
-import { publicEvent } from '../lib/eventService.js';
+import { publicEvent, listSedes } from '../lib/eventService.js';
 import { ingest, feed, publicPhoto, HEIF_SUPPORTED } from '../lib/photoService.js';
 import { subscribe, clientCount } from '../lib/bus.js';
 import { urlFor } from '../lib/media.js';
@@ -35,6 +35,16 @@ export function uploadUrl(ev) {
 }
 
 /* ─────────────────────────────── evento y feed ───────────────────────────── */
+
+/** Lista de sedes para el selector del login del panel. Sin datos sensibles. */
+api.get('/sedes', async (req, res) => {
+  const sedes = await listSedes();
+  res.json({
+    sedes: sedes
+      .map((e) => ({ id: e.id, slug: e.slug, name: e.name, sede: e.sede || '' }))
+      .sort((a, b) => (a.sede || a.name).localeCompare(b.sede || b.name, 'es')),
+  });
+});
 
 api.get('/event/:event', withEvent, async (req, res) => {
   res.json({

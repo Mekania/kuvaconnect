@@ -96,7 +96,7 @@ export async function getEvent(idOrSlug) {
 
 export async function addEvent(ev) {
   const root = await rootId();
-  const folderId = await drive.findOrCreateFolder(ev.name, root);
+  const folderId = await drive.findOrCreateFolder(drive.eventFolderName(ev), root);
   await drive.setMeta(folderId, {
     description: JSON.stringify(ev),
     appProperties: { kuvaEvent: '1', kid: ev.id, slug: ev.slug },
@@ -111,9 +111,10 @@ export async function updateEvent(id, patch) {
   if (!ev) return null;
   const next = { ...ev, ...patch, updatedAt: new Date().toISOString() };
   const { folderId, ...clean } = next;
+  const newFolderName = drive.eventFolderName(next);
   await drive.setMeta(ev.folderId, {
     description: JSON.stringify(clean),
-    ...(patch.name && patch.name !== ev.name ? { name: patch.name } : {}),
+    ...(newFolderName !== drive.eventFolderName(ev) ? { name: newFolderName } : {}),
   });
   return next;
 }

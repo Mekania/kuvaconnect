@@ -2,25 +2,21 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 
 /**
- * Autenticación del panel: un PIN que conoce el logístico.
+ * Autenticación del panel.
  *
- * No es un sistema de usuarios — es el candado de una herramienta que corre
- * durante un evento. Lo que sí cambió: la sesión ahora es un **token firmado**
- * en vez de una entrada en memoria. En serverless el proceso muere entre
- * peticiones, así que una sesión guardada en RAM se pierde en cada request.
+ * Cada sede tiene su propio PIN, y la sesión que abre solo sirve para ESA sede:
+ * el moderador de Bogotá no puede ver ni tocar las fotos de Medellín aunque
+ * adivine la URL. El PIN maestro (ADMIN_PIN) abre todas las sedes y los ajustes.
  *
- * El token es `expiración.firma`, firmado con HMAC-SHA256 sobre una clave
- * secreta. El servidor no guarda nada: solo verifica la firma.
+ * La sesión es un token firmado `expiración.alcance.firma` con HMAC-SHA256.
+ * El servidor no guarda nada (en serverless no hay dónde): solo verifica la firma.
+ * El alcance es el id del evento de la sede, o `*` para el maestro.
  */
 
 const TTL_MS = 1000 * 60 * 60 * 18; // una jornada larga de evento
 export const COOKIE = 'kuva_admin';
+export const ALL = '*';
 
-/**
- * Clave para firmar sesiones. En producción se define aparte del PIN para que
- * cambiar el PIN no obligue a nada más; si falta, se deriva del PIN, que sigue
- * siendo secreto pero hace que cambiar el PIN invalide las sesiones abiertas.
- */
 function secret() {
   return process.env.SESSION_SECRET || `kuva:${config.adminPin}`;
 }
@@ -29,31 +25,44 @@ function sign(payload) {
   return crypto.createHmac('sha256', secret()).update(payload).digest('base64url');
 }
 
-function safeEqual(a, b) {
+export function safeEqual(a, b) {
   const ba = Buffer.from(String(a));
   const bb = Buffer.from(String(b));
   if (ba.length !== bb.length) return false;
   return crypto.timingSafeEqual(ba, bb);
 }
 
-export function login(pin) {
-  if (!safeEqual(pin, config.adminPin)) return null;
+/**
+ * Hash del PIN de una sede. El id del evento hace de sal: dos sedes con el mismo
+ * PIN no quedan con el mismo hash, y el PIN nunca se guarda en claro en Drive.
+ */
+export function hashPin(eventId, pin) {
+  return crypto.createHash('sha256').update(`kuva-pin:${eventId}:${String(pin).trim()}`).digest('hex');
+}
+
+export function isMasterPin(pin) {
+  return safeEqual(String(pin).trim(), config.adminPin);
+}
+
+/** Emite una sesión para un alcance (id de evento, o ALL). */
+export function issue(scope) {
   const exp = String(Date.now() + TTL_MS);
-  return `${exp}.${sign(exp)}`;
+  const body = `${exp}.${scope}`;
+  return `${body}.${sign(body)}`;
 }
 
-export function valid(token) {
-  if (!token || typeof token !== 'string') return false;
-  const dot = token.lastIndexOf('.');
-  if (dot < 1) return false;
-  const exp = token.slice(0, dot);
-  const mac = token.slice(dot + 1);
-  if (!/^\d+$/.test(exp) || Number(exp) < Date.now()) return false;
-  return safeEqual(mac, sign(exp));
+/** Devuelve el alcance de un token válido, o null. */
+export function scopeOf(token) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  const [exp, scope, mac] = parts;
+  if (!/^\d+$/.test(exp) || Number(exp) < Date.now()) return null;
+  if (!/^[A-Za-z0-9*_-]+$/.test(scope)) return null;
+  return safeEqual(mac, sign(`${exp}.${scope}`)) ? scope : null;
 }
 
-/** Sin estado que borrar: cerrar sesión es botar la cookie del navegador. */
-export function logout() { /* no-op */ }
+export function logout() { /* sin estado: cerrar sesión es botar la cookie */ }
 
 export function parseCookies(header = '') {
   const out = {};
@@ -72,16 +81,33 @@ export function tokenFrom(req) {
   return parseCookies(req.headers.cookie || '')[COOKIE];
 }
 
+export function sessionScope(req) {
+  return scopeOf(tokenFrom(req));
+}
+
 export function isAdmin(req) {
-  return valid(tokenFrom(req));
+  return Boolean(sessionScope(req));
+}
+
+/** ¿Esta sesión puede tocar este evento? */
+export function canAccess(req, eventId) {
+  const scope = sessionScope(req);
+  return scope === ALL || (Boolean(scope) && scope === eventId);
 }
 
 export function requireAdmin(req, res, next) {
-  if (isAdmin(req)) return next();
-  return res.status(401).json({ error: 'No autorizado. Inicia sesión en el panel.' });
+  const scope = sessionScope(req);
+  if (!scope) return res.status(401).json({ error: 'No autorizado. Inicia sesión en el panel.' });
+  req.scope = scope;
+  next();
 }
 
-/** `Secure` solo fuera de local: en la red del salón la pantalla va por http. */
+/** Solo el PIN maestro: ajustes, marcos, Drive, crear sedes. */
+export function requireMaster(req, res, next) {
+  if (req.scope === ALL) return next();
+  return res.status(403).json({ error: 'Esto solo lo puede hacer el administrador general.' });
+}
+
 function cookieFlags() {
   const secure = process.env.VERCEL || process.env.NODE_ENV === 'production' ? '; Secure' : '';
   return `Path=/; HttpOnly; SameSite=Lax${secure}`;

@@ -176,8 +176,12 @@ async function boot() {
     return;
   }
 
-  document.title = `${event.name} · Sube tu foto`;
+  document.title = `${event.sede ? `${event.sede} · ` : ''}${event.name} · Sube tu foto`;
   $('#title').textContent = event.name;
+  if (event.sede) {
+    $('#sedeName').textContent = event.sede;
+    $('#sedeTag').hidden = false;
+  }
   $('#subtitle').textContent = event.subtitle || '';
   if (event.hashtag) $('#eyebrow').textContent = event.hashtag;
 

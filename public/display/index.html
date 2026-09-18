@@ -100,6 +100,14 @@
   }
   .count strong { font-size: clamp(1.1rem, 2.7vmin, 2rem); font-weight: 900; font-variant-numeric: tabular-nums; }
   .count span { font-size: clamp(.58rem, 1.15vmin, .8rem); letter-spacing: .14em; text-transform: uppercase; font-weight: 800; }
+  .sede {
+    display: inline-flex; align-items: center; gap: .4em;
+    background: var(--gold); color: #40300A;
+    padding: .38em 1em; border-radius: 999px; box-shadow: 0 5px 0 #A87E12;
+    font-size: clamp(.72rem, 1.6vmin, 1.1rem); font-weight: 900;
+    letter-spacing: .12em; text-transform: uppercase;
+  }
+  .sede[hidden] { display: none; }
   .live {
     display: inline-flex; align-items: center; gap: .5em;
     font-size: clamp(.6rem, 1.2vmin, .82rem); letter-spacing: .2em;
@@ -184,8 +192,14 @@
 
   /* ═══════════════════ celebración de la foto que acaba de entrar ══════════ */
 
+  /*
+    La celebración cubre SOLO el álbum, nunca la franja del QR: con cuatro sedes
+    y fotos entrando seguido, una celebración a pantalla completa dejaría el QR
+    tapado buena parte del tiempo, justo cuando más gente quiere escanearlo.
+    --hero-top lo fija el JS con la altura real de la franja superior.
+  */
   .hero {
-    position: fixed; inset: 0; z-index: 50;
+    position: fixed; left: 0; right: 0; bottom: 0; top: var(--hero-top, 0); z-index: 50;
     display: grid; place-items: center;
     background: radial-gradient(70% 70% at 50% 45%, rgba(196, 29, 93, .93), rgba(110, 7, 48, .97));
     opacity: 0; pointer-events: none;
@@ -199,7 +213,8 @@
   }
   .hero.on figure { transform: none; }
   .hero img {
-    max-height: 68dvh; max-width: 80vw; width: auto; height: auto;
+    max-height: calc(var(--hero-h, 100dvh) - clamp(150px, 20vh, 230px));
+    max-width: 80vw; width: auto; height: auto;
     border-radius: 10px;
     box-shadow: 0 30px 80px rgba(0, 0, 0, .5), 0 0 0 8px #fff;
   }
@@ -214,7 +229,7 @@
   .hero .by { color: var(--on-brand-soft); font-size: clamp(.85rem, 1.7vmin, 1.2rem); font-weight: 700; }
 
   /* Confeti de corazones en la celebración. */
-  .confetti { position: fixed; inset: 0; z-index: 51; pointer-events: none; overflow: hidden; }
+  .confetti { position: fixed; left: 0; right: 0; bottom: 0; top: var(--hero-top, 0); z-index: 51; pointer-events: none; overflow: hidden; }
   .confetti i {
     position: absolute; top: -8vh;
     font-size: var(--sz, 2rem); font-style: normal;
@@ -267,6 +282,7 @@
           <li><b>3</b> Sal en pantalla</li>
         </ol>
         <div class="meta">
+          <div class="sede" id="sede" hidden>📍 <span id="sedeName"></span></div>
           <div class="count"><strong id="count">0</strong> <span>fotos</span></div>
           <div class="live"><i class="dot dot-live" id="dot"></i> <span id="liveLabel">En vivo</span></div>
         </div>

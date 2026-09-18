@@ -11,7 +11,8 @@
     "frames:preview": "node scripts/preview-frames.js",
     "drive:check": "node scripts/drive-check.js",
     "drive:selftest": "node scripts/drive-selftest.js",
-    "drive:auth": "node scripts/drive-auth.js"
+    "drive:auth": "node scripts/drive-auth.js",
+    "sedes": "node scripts/sedes.js"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

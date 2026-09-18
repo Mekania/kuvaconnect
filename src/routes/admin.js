@@ -3,7 +3,7 @@ import sharp from 'sharp';
 import { config, baseUrl } from '../config.js';
 import * as auth from '../lib/auth.js';
 import { getEvent, getPhoto, listEvents, listPhotos, updateEvent, countByStatus } from '../lib/db.js';
-import { createEvent, publicEvent, setActive, activeEvent, frameMeta } from '../lib/eventService.js';
+import { createEvent, publicEvent, adminEvent, setActive, activeEvent, frameMeta, listSedes, checkSedePin } from '../lib/eventService.js';
 import { listFrames, getFrame } from '../lib/frames/index.js';
 import { composeFramed } from '../lib/compose.js';
 import { approve, reject, markPrinted, recompose, destroy, queue, adminPhoto, adminChannel } from '../lib/photoService.js';
@@ -21,11 +21,28 @@ admin.use(express.json({ limit: '256kb' }));
 
 /* ─────────────────────────────── sesión ──────────────────────────────────── */
 
-admin.post('/login', (req, res) => {
-  const t = auth.login(String(req.body?.pin || ''));
-  if (!t) return res.status(401).json({ error: 'PIN incorrecto' });
+/**
+ * Entrar al panel: se elige la sede y se pone su PIN.
+ * El PIN maestro entra a cualquier sede (y a los ajustes) sin importar cuál se
+ * haya elegido.
+ */
+admin.post('/login', async (req, res) => {
+  const pin = String(req.body?.pin || '');
+  const eventId = String(req.body?.event || '');
+
+  if (auth.isMasterPin(pin)) {
+    const t = auth.issue(auth.ALL);
+    auth.setCookie(res, t);
+    return res.json({ ok: true, token: t, scope: auth.ALL });
+  }
+
+  const ev = eventId ? await getEvent(eventId) : null;
+  if (!ev || ev.archived || !checkSedePin(ev, pin)) {
+    return res.status(401).json({ error: 'PIN incorrecto para esa sede' });
+  }
+  const t = auth.issue(ev.id);
   auth.setCookie(res, t);
-  res.json({ ok: true, token: t });
+  res.json({ ok: true, token: t, scope: ev.id });
 });
 
 admin.post('/logout', (req, res) => {
@@ -34,14 +51,20 @@ admin.post('/logout', (req, res) => {
   res.json({ ok: true });
 });
 
-admin.get('/session', (req, res) => res.json({ authenticated: auth.isAdmin(req) }));
+admin.get('/session', (req, res) => {
+  const scope = auth.sessionScope(req);
+  res.json({ authenticated: Boolean(scope), scope, master: scope === auth.ALL });
+});
 
 admin.use(auth.requireAdmin);
+const master = auth.requireMaster;
 
+/** Carga el evento y verifica que la sesión sea de esa sede. */
 async function withEvent(req, res, next) {
   try {
     const ev = await getEvent(req.params.event);
     if (!ev) return res.status(404).json({ error: 'Evento no encontrado' });
+    if (!auth.canAccess(req, ev.id)) return res.status(403).json({ error: 'Esta sesión es de otra sede.' });
     req.event = ev;
     next();
   } catch (err) {
@@ -49,16 +72,32 @@ async function withEvent(req, res, next) {
   }
 }
 
+/** Igual para las acciones sobre una foto: la foto tiene que ser de tu sede. */
+admin.use('/photos/:id', async (req, res, next) => {
+  try {
+    const p = await getPhoto(req.params.id);
+    if (!p) return res.status(404).json({ error: 'Foto no encontrada' });
+    if (!auth.canAccess(req, p.eventId)) return res.status(403).json({ error: 'Esa foto es de otra sede.' });
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* ─────────────────────────────── eventos ─────────────────────────────────── */
 
 admin.get('/bootstrap', async (req, res) => {
-  const [active, events] = await Promise.all([activeEvent(), listEvents()]);
+  const isMaster = req.scope === auth.ALL;
+  const [active, all] = await Promise.all([activeEvent(), listSedes()]);
+  const events = isMaster ? all : all.filter((e) => e.id === req.scope);
   const withCounts = await Promise.all(events.map(async (e) => ({
     ...publicEvent(e), active: e.active, counts: await countByStatus(e.id),
   })));
   res.json({
+    scope: req.scope,
+    master: isMaster,
     events: withCounts,
-    activeEventId: active?.id || null,
+    activeEventId: isMaster ? (active?.id || null) : req.scope,
     frames: listFrames(),
     drive: await driveSync.queueStats(),
     baseUrl: baseUrl(),
@@ -67,14 +106,14 @@ admin.get('/bootstrap', async (req, res) => {
 
 admin.get('/events/:event', withEvent, async (req, res) => {
   res.json({
-    event: { ...req.event, counts: await countByStatus(req.event.id) },
+    event: { ...adminEvent(req.event), counts: await countByStatus(req.event.id) },
     uploadUrl: uploadUrl(req.event),
     displayUrl: `${baseUrl()}/d/${req.event.slug}`,
     diskBytes: await media.diskUsage(req.event.id),
   });
 });
 
-admin.post('/events', async (req, res) => {
+admin.post('/events', master, async (req, res) => {
   try {
     const ev = await createEvent(req.body || {});
     res.status(201).json({ event: ev });
@@ -89,7 +128,7 @@ const EDITABLE = new Set([
   'displayColumns', 'theme', 'active',
 ]);
 
-admin.patch('/events/:event', withEvent, async (req, res) => {
+admin.patch('/events/:event', master, withEvent, async (req, res) => {
   const patch = {};
   for (const [k, v] of Object.entries(req.body || {})) if (EDITABLE.has(k)) patch[k] = v;
   if (patch.frameId) patch.frameId = getFrame(patch.frameId).id;
@@ -98,7 +137,7 @@ admin.patch('/events/:event', withEvent, async (req, res) => {
   res.json({ event: ev });
 });
 
-admin.post('/events/:event/activate', withEvent, async (req, res) => {
+admin.post('/events/:event/activate', master, withEvent, async (req, res) => {
   res.json({ event: await setActive(req.event.id) });
 });
 
@@ -145,7 +184,7 @@ admin.delete('/photos/:id', async (req, res) => {
   res.json({ ok: true, id: p.id });
 });
 
-admin.post('/photos/:id/recompose', async (req, res) => {
+admin.post('/photos/:id/recompose', master, async (req, res) => {
   const p = await getPhoto(req.params.id);
   if (!p) return res.status(404).json({ error: 'Foto no encontrada' });
   try {
@@ -171,7 +210,7 @@ admin.post('/events/:event/bulk', withEvent, async (req, res) => {
 });
 
 /** Recompone todas las impresiones del evento — al cambiar de marco. */
-admin.post('/events/:event/recompose-all', withEvent, async (req, res) => {
+admin.post('/events/:event/recompose-all', master, withEvent, async (req, res) => {
   const rows = (await listPhotos(req.event.id)).filter((p) => p.status !== 'error');
   // En serverless la funcion muere al responder, asi que aqui si esperamos.
   for (const p of rows) {
@@ -204,7 +243,7 @@ async function sampleShot(orientation) {
   return sharp(Buffer.from(svg)).jpeg({ quality: 90 }).toBuffer();
 }
 
-admin.get('/frames/:id/preview.jpg', async (req, res) => {
+admin.get('/frames/:id/preview.jpg', master, async (req, res) => {
   const orientation = req.query.orientation === 'landscape' ? 'landscape' : 'portrait';
   const ev = req.query.event ? await getEvent(req.query.event) : await activeEvent();
   try {
@@ -223,7 +262,7 @@ admin.get('/frames/:id/preview.jpg', async (req, res) => {
 
 /* ──────────────────────────────── Drive ──────────────────────────────────── */
 
-admin.get('/drive/status', async (req, res) => {
+admin.get('/drive/status', master, async (req, res) => {
   const stats = await driveSync.queueStats();
   let account = null;
   if (drive.isConfigured()) {
@@ -232,19 +271,19 @@ admin.get('/drive/status', async (req, res) => {
   res.json({ ...stats, account, enabled: config.drive.enabled });
 });
 
-admin.post('/drive/sync', async (req, res) => {
+admin.post('/drive/sync', master, async (req, res) => {
   await driveSync.syncNow();
   res.json({ ok: true, ...(await driveSync.queueStats()) });
 });
 
-admin.post('/drive/requeue', async (req, res) => {
+admin.post('/drive/requeue', master, async (req, res) => {
   drive.resetClient();
   const n = await driveSync.requeueAll();
   await driveSync.syncNow();
   res.json({ ok: true, requeued: n });
 });
 
-admin.get('/drive/folders/:event', withEvent, async (req, res) => {
+admin.get('/drive/folders/:event', master, withEvent, async (req, res) => {
   if (!drive.isConfigured()) return res.status(400).json({ error: 'Drive no está configurado todavía.' });
   try {
     res.json({ folders: await drive.ensureEventFolders(req.event) });

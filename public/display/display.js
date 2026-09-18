@@ -201,8 +201,22 @@ function burstConfetti(n = 26) {
 
 /* ──────────────────────────────── arranque ──────────────────────────────── */
 
+/** Deja la celebración justo debajo de la franja del QR (ver .hero en el CSS). */
+function placeHero() {
+  const stage = document.querySelector('.stage');
+  if (!stage) return;
+  const top = Math.round(stage.getBoundingClientRect().bottom);
+  const root = document.documentElement.style;
+  root.setProperty('--hero-top', `${top}px`);
+  root.setProperty('--hero-h', `${Math.max(200, window.innerHeight - top)}px`);
+}
+
 function applyTheme(ev) {
-  document.title = `${ev.name} · KuvaConnect`;
+  document.title = `${ev.sede ? `${ev.sede} · ` : ''}${ev.name} · KuvaConnect`;
+  if (ev.sede) {
+    $('#sedeName').textContent = ev.sede;
+    $('#sede').hidden = false;
+  }
   $('#title').textContent = ev.name;
   $('#subtitle').textContent = ev.subtitle || '';
   if (ev.hashtag) $('#eyebrow').textContent = ev.hashtag;
@@ -243,6 +257,10 @@ async function boot() {
 
   eventId = info.event.id;
   applyTheme(info.event);
+  placeHero();
+  // Las fuentes y el QR cambian la altura de la franja al terminar de cargar.
+  $('#qr').addEventListener('load', placeHero);
+  document.fonts?.ready?.then(placeHero);
   setCount(info.counts.approved);
   $('#qr').src = `/api/event/${eventId}/qr.png?size=1000`;
 
@@ -320,7 +338,7 @@ boot();
 let resizeTimer;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(layoutAlbum, 200);
+  resizeTimer = setTimeout(() => { placeHero(); layoutAlbum(); }, 200);
 });
 
 // La pantalla no debe apagarse a mitad del evento.

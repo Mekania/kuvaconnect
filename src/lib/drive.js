@@ -175,9 +175,18 @@ export async function findOrCreateFolder(name, parentId) {
  *       03_Rechazadas     ← lo que se bloqueó en moderación
  *       04_Impresas       ← ya salieron por la DNP
  */
+/**
+ * Nombre de la carpeta de un evento en Drive.
+ * Las cuatro sedes comparten el nombre del evento ("Exprésate 24/7"), así que
+ * la sede va en el nombre: si no, las cuatro caerían en la misma carpeta.
+ */
+export function eventFolderName(ev) {
+  return ev.sede ? `${ev.name} · ${ev.sede}` : ev.name;
+}
+
 export async function ensureEventFolders(event) {
   const rootId = config.drive.rootFolderId || await findOrCreateFolder('KuvaConnect', null);
-  const eventFolder = await findOrCreateFolder(event.name, rootId);
+  const eventFolder = event.folderId || await findOrCreateFolder(eventFolderName(event), rootId);
   const [originals, toPrint, rejected, printed] = await Promise.all([
     findOrCreateFolder('01_Originales', eventFolder),
     findOrCreateFolder('02_Para_imprimir', eventFolder),

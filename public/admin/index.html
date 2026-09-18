@@ -177,9 +177,15 @@
         <div class="eyebrow">KuvaConnect</div>
         <h1 style="margin-top:.35em">Panel de control</h1>
       </div>
-      <input class="input" id="pin" type="password" inputmode="numeric" placeholder="PIN" autocomplete="current-password" autofocus>
+      <div class="field" style="text-align:left">
+        <label for="sedeSel">Sede</label>
+        <select class="input" id="sedeSel" required>
+          <option value="">Cargando sedes…</option>
+        </select>
+      </div>
+      <input class="input" id="pin" type="password" inputmode="numeric" placeholder="PIN" autocomplete="current-password">
       <button class="btn btn-brand btn-block" type="submit">Entrar</button>
-      <p class="hint">Es la herramienta del logístico: moderación, cola de impresión y estado de Drive.</p>
+      <p class="hint">Cada sede modera solo sus fotos. Pide el PIN de tu sede al coordinador.</p>
     </form>
   </div>
 
@@ -187,7 +193,8 @@
   <div class="app" id="app">
     <header class="bar on-brand">
       <div class="brand">Kuva<b>Connect</b></div>
-      <select class="input" id="eventSel" style="width:auto;min-width:180px;padding:.5em .7em"></select>
+      <span class="pill pill-gold" id="sedeBadge" hidden></span>
+      <select class="input" id="eventSel" style="width:auto;min-width:180px;padding:.5em .7em" hidden></select>
       <div class="counts" id="counts"></div>
       <div class="grow"></div>
       <span class="live"><i class="dot dot-live" id="dot"></i><span id="liveLabel">En vivo</span></span>
