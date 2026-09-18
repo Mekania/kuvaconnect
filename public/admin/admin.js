@@ -177,19 +177,38 @@ function card(p, { mode }) {
 let printFrame = null;
 
 /**
- * Manda la foto a la impresora desde el panel.
+ * Documento que se manda a la impresora.
  *
- * El archivo ya es exactamente 10x15 cm a 300 dpi, así que aquí solo se declara
- * el tamaño de página y se estira la imagen a la hoja completa: sin márgenes,
- * sin reescalados del navegador, sin "ajustar a página" que recorte el marco.
- * El navegador no puede imprimir en silencio, así que abre el diálogo — ahí se
- * elige la DNP la primera vez y queda como predeterminada.
+ * Dos decisiones, las dos aprendidas en una prueba real:
+ *
+ *  - Se pide papel de 4x6 PULGADAS, no 10x15 cm. Es el nombre con el que los
+ *    drivers de la DNP (y casi todas las impresoras de foto) declaran ese papel,
+ *    y Chrome solo respeta el tamaño pedido si el driver tiene uno que coincida.
+ *    Tienen la misma proporción 2:3, así que el marco no se deforma.
+ *
+ *  - La foto NO va en medidas fijas: llena la hoja que haya (object-fit:
+ *    contain), centrada. Si el driver ignora el tamaño y usa otro papel, la foto
+ *    igual sale lo más grande posible y sin recortar el marco, en vez de quedar
+ *    pegada a una esquina con todo lo demás en blanco.
+ */
+function printDocument(src, { landscape = false, title = 'Kuva' } = {}) {
+  const size = landscape ? '6in 4in' : '4in 6in';
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
+    <style>
+      @page { size: ${size}; margin: 0; }
+      html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #fff; }
+      body { display: flex; align-items: center; justify-content: center; overflow: hidden; }
+      img { display: block; width: 100%; height: 100%; object-fit: contain; }
+    </style></head><body><img src="${src}"></body></html>`;
+}
+
+/**
+ * Manda la foto a la impresora desde el panel.
+ * Un navegador no puede elegir impresora ni imprimir en silencio: abre el
+ * diálogo. Para imprimir directo, sin diálogo, ver el acceso directo con
+ * --kiosk-printing en IMPRESION.md.
  */
 function printPhoto(p) {
-  const landscape = p.orientation === 'landscape';
-  const w = landscape ? '15cm' : '10cm';
-  const h = landscape ? '10cm' : '15cm';
-
   if (!printFrame) {
     printFrame = el('iframe', { 'aria-hidden': 'true', style: 'position:fixed;left:-9999px;width:0;height:0;border:0' });
     document.body.append(printFrame);
@@ -197,12 +216,10 @@ function printPhoto(p) {
 
   const doc = printFrame.contentWindow.document;
   doc.open();
-  doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>Kuva ${p.seq}</title>
-    <style>
-      @page { size: ${w} ${h}; margin: 0; }
-      html, body { margin: 0; padding: 0; background: #fff; }
-      img { display: block; width: ${w}; height: ${h}; object-fit: fill; }
-    </style></head><body><img src="${p.urls.print}"></body></html>`);
+  doc.write(printDocument(p.urls.print, {
+    landscape: p.orientation === 'landscape',
+    title: `Kuva ${String(p.seq).padStart(3, '0')}`,
+  }));
   doc.close();
 
   const img = doc.querySelector('img');
